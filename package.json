@@ -1,0 +1,51 @@
+{
+  "name": "toran",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Toran - open-source, self-hostable secure file sharing.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "packageManager": "npm@11.6.0",
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:infra": "docker compose -f docker-compose.dev.yml up -d",
+    "dev:infra:down": "docker compose -f docker-compose.dev.yml down",
+    "dev:setup": "node scripts/dev-setup.mjs",
+    "build": "turbo run build",
+    "start": "npm run start --workspace=@toran/web",
+    "lint": "turbo run lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:integration": "turbo run test:integration --concurrency=1",
+    "test:e2e": "npm run test:e2e --workspace=@toran/web",
+    "db:generate": "npm run db:generate --workspace=@toran/database",
+    "db:migrate": "npm run db:migrate --workspace=@toran/database",
+    "db:seed": "npm run db:seed --workspace=@toran/database",
+    "db:studio": "npm run db:studio --workspace=@toran/database",
+    "admin": "npm run admin --workspace=@toran/worker",
+    "secrets:scan": "node scripts/check-secrets.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@next/eslint-plugin-next": "^15.1.6",
+    "@types/node": "^22.10.7",
+    "eslint": "^9.18.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "globals": "^15.14.0",
+    "prettier": "^3.4.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.20.0"
+  }
+}

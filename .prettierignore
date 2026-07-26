@@ -1,0 +1,13 @@
+node_modules
+dist
+.next
+.turbo
+coverage
+playwright-report
+test-results
+package-lock.json
+*.min.js
+LICENSE
+CHANGELOG.md
+packages/database/drizzle
+.data

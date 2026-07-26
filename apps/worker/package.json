@@ -1,0 +1,34 @@
+{
+  "name": "@toran/worker",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "./dist/main.js",
+  "bin": {
+    "toran-admin": "./dist/cli/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "start": "node --enable-source-maps dist/main.js",
+    "admin": "node --enable-source-maps dist/cli/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run --config vitest.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
+  },
+  "dependencies": {
+    "@toran/config": "*",
+    "@toran/database": "*",
+    "@toran/observability": "*",
+    "@toran/security": "*",
+    "@toran/shared": "*",
+    "@toran/storage": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

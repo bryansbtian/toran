@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Feature request
+description: Suggest a capability Toran does not have yet.
+labels: ['enhancement', 'needs-triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Toran aims to stay small, self-hostable and secure by default. The most
+        useful requests explain the problem rather than prescribing a solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Who hits it, how often, and what do they do today instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like Toran to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area?
+      options:
+        - Upload experience
+        - Download experience
+        - Security or privacy
+        - Storage backends
+        - Malware scanning
+        - Administration and abuse handling
+        - Self-hosting and deployment
+        - Observability
+        - Accessibility or internationalisation
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Does this fit Toran's constraints?
+      description: |
+        Toran must stay usable with no paid third-party service, must not route
+        file contents through the application server, and must remain secure by
+        default. Tick the ones you have thought about.
+      options:
+        - label: This works without requiring a paid third-party service.
+        - label: This does not route uploaded file contents through the Toran server.
+        - label: This does not weaken any default security setting.
+        - label: I am willing to help implement it.

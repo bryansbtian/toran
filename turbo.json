@@ -1,0 +1,39 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "stream",
+  "globalEnv": ["NODE_ENV", "CI"],
+  "globalDependencies": [".env", "tsconfig.base.json"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+    },
+    "dev": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "dependsOn": ["^build"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"]
+    },
+    "test:integration": {
+      "dependsOn": ["^build"],
+      // Never cached, and the root script runs this with --concurrency=1:
+      // every package's integration suite shares one PostgreSQL database and
+      // truncates it between tests, so running two packages at once would let
+      // one suite delete another's fixtures mid-test.
+      "cache": false
+    },
+    "test:e2e": {
+      "dependsOn": ["^build"],
+      "cache": false
+    }
+  }
+}

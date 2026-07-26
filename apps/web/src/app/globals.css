@@ -1,0 +1,117 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Semantic colour tokens.
+ *
+ * Every value is stored as an unprefixed RGB triple so Tailwind's
+ * `<alpha-value>` syntax works. Light and dark are the same token names with
+ * different values, so components never carry `dark:` variants.
+ *
+ * Contrast: ink on surface is >= 12:1 and ink-muted on surface is >= 4.6:1 in
+ * both themes, comfortably clearing WCAG AA for body text.
+ */
+@layer base {
+  :root {
+    --toran-surface: 248 250 252;
+    --toran-surface-raised: 255 255 255;
+    --toran-surface-sunken: 241 245 249;
+    --toran-ink: 15 23 42;
+    --toran-ink-muted: 71 85 105;
+    --toran-ink-subtle: 148 163 184;
+    --toran-line: 226 232 240;
+
+    --toran-brand-50: 240 253 250;
+    --toran-brand-200: 153 246 228;
+    --toran-brand-500: 20 184 166;
+    --toran-brand-600: 15 118 110;
+    --toran-brand-700: 17 94 89;
+    --toran-brand-800: 19 78 74;
+
+    --toran-success-50: 240 253 244;
+    --toran-success-200: 187 247 208;
+    --toran-success-800: 22 101 52;
+
+    --toran-warning-50: 255 251 235;
+    --toran-warning-200: 253 230 138;
+    --toran-warning-800: 146 64 14;
+
+    --toran-danger-50: 254 242 242;
+    --toran-danger-200: 254 202 202;
+    --toran-danger-600: 220 38 38;
+    --toran-danger-700: 185 28 28;
+    --toran-danger-800: 153 27 27;
+
+    color-scheme: light;
+  }
+
+  [data-theme='dark'] {
+    --toran-surface: 2 6 23;
+    --toran-surface-raised: 15 23 42;
+    --toran-surface-sunken: 30 41 59;
+    --toran-ink: 248 250 252;
+    --toran-ink-muted: 165 180 199;
+    --toran-ink-subtle: 100 116 139;
+    --toran-line: 51 65 85;
+
+    --toran-brand-50: 19 78 74;
+    --toran-brand-200: 45 212 191;
+    --toran-brand-500: 45 212 191;
+    --toran-brand-600: 20 184 166;
+    --toran-brand-700: 45 212 191;
+    --toran-brand-800: 153 246 228;
+
+    --toran-success-50: 20 63 40;
+    --toran-success-200: 74 222 128;
+    --toran-success-800: 187 247 208;
+
+    --toran-warning-50: 69 39 10;
+    --toran-warning-200: 252 211 77;
+    --toran-warning-800: 253 230 138;
+
+    --toran-danger-50: 69 10 10;
+    --toran-danger-200: 248 113 113;
+    --toran-danger-600: 239 68 68;
+    --toran-danger-700: 248 113 113;
+    --toran-danger-800: 254 202 202;
+
+    color-scheme: dark;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-surface text-ink antialiased;
+  }
+
+  /*
+   * Respect the operating-system preference for reduced motion. Transitions
+   * are collapsed rather than removed so state changes stay perceivable.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* Anything focused by keyboard gets a clearly visible ring. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand-500 ring-offset-2 ring-offset-surface;
+  }
+}
+
+@layer components {
+  .toran-skip-link {
+    @apply sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50
+      focus:rounded-lg focus:bg-brand-600 focus:px-4 focus:py-2 focus:text-white;
+  }
+}

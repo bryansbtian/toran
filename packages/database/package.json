@@ -1,0 +1,52 @@
+{
+  "name": "@toran/database",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "default": "./dist/schema.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/harness.d.ts",
+      "default": "./dist/testing/harness.js"
+    }
+  },
+  "files": [
+    "dist",
+    "drizzle"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node --enable-source-maps dist/scripts/migrate.js",
+    "db:seed": "node --enable-source-maps dist/scripts/seed.js",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@toran/config": "*",
+    "@toran/security": "*",
+    "@toran/shared": "*",
+    "drizzle-orm": "^0.38.4",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "drizzle-kit": "^0.30.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

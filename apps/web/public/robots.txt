@@ -1,0 +1,4 @@
+# Toran serves private share links whose URL is itself the credential.
+# Nothing here should ever be crawled or indexed.
+User-agent: *
+Disallow: /

@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.next/
+out/
+*.tsbuildinfo
+
+# Turborepo
+.turbo/
+
+# Environment / secrets - never commit real values
+.env
+.env.*
+!.env.example
+
+# Test artifacts
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+
+# Local data volumes
+.data/
+
+# Editors / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Generated SBOMs
+sbom*.json

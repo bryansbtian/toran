@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Supply chain
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '31 5 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    # Only meaningful on a pull request, where there is a base to diff against.
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: always
+          # Toran is AGPL-3.0-only. These licences cannot be combined with it.
+          # This is an automated first pass, NOT a legal review - see
+          # docs/LICENSING.md before any commercial launch.
+          deny-licenses: >-
+            AGPL-1.0-only, AGPL-1.0-or-later,
+            SSPL-1.0,
+            BUSL-1.1,
+            Elastic-2.0,
+            CC-BY-NC-4.0, CC-BY-NC-SA-4.0,
+            JSON
+
+  audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Audit production dependencies
+        # Advisory: dev-only advisories should not block a release, but a high
+        # severity issue in something that ships must.
+        run: npm audit --omit=dev --audit-level=high
+
+  sbom:
+    name: Software bill of materials
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+
+      - name: Generate a CycloneDX SBOM
+        run: npx --yes @cyclonedx/cyclonedx-npm@latest --output-file sbom.cdx.json --omit dev
+
+      - name: Upload the SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          retention-days: 90
+
+  licenses:
+    name: Dependency licence inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+
+      - name: List production dependency licences
+        run: npx --yes license-checker-rseidelsohn --production --summary --excludePrivatePackages
