@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { and, eq, inArray, isNotNull, isNull, lt, lte, sql } from 'drizzle-orm';
 import type { Database } from '../client.js';
 import { ts } from '../sql-helpers.js';
@@ -7,6 +7,7 @@ import {
   files,
   jobs,
   rateLimits,
+  shareLinkFiles,
   shareLinks,
   uploadSessions,
   type FileRow,
@@ -140,6 +141,34 @@ export async function pruneDownloadEvents(
       )`,
     )
     .returning({ id: downloadEvents.id });
+  return rows.length;
+}
+
+/**
+ * Deletes links that have lost every file they served.
+ *
+ * A link no longer carries a file reference of its own, so removing a file row
+ * cascades to `share_link_files` and leaves the link behind. Such a link is
+ * already unservable - `evaluateShare` reports a link with no files as
+ * `not_found` - but leaving it would keep its download events alive with it,
+ * where deleting a file used to take both away.
+ */
+export async function deleteOrphanedShareLinks(
+  db: Database,
+  input: { readonly limit: number },
+): Promise<number> {
+  const rows = await db
+    .delete(shareLinks)
+    .where(
+      sql`${shareLinks.id} in (
+        select sl.id from ${shareLinks} sl
+        where not exists (
+          select 1 from ${shareLinkFiles} slf where slf.share_link_id = sl.id
+        )
+        limit ${input.limit}
+      )`,
+    )
+    .returning({ id: shareLinks.id });
   return rows.length;
 }
 

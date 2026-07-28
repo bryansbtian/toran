@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 
 /**
  * Stable machine-readable error codes. Clients may branch on these; the

@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-License-Identifier: MIT -->
 
 # Upgrading Toran
 
@@ -30,7 +30,7 @@ handled for you.
 ## Migration policy
 
 Toran migrations are **forward-only and additive**. Toran never runs a
-destructive statement automatically — no dropped columns, no dropped tables, no
+destructive statement automatically - no dropped columns, no dropped tables, no
 type changes that lose data.
 
 This means an old and a new version can run at the same time, so rolling

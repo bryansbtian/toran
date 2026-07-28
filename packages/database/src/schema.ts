@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { sql } from 'drizzle-orm';
 import {
   bigint,
@@ -122,10 +122,15 @@ export const uploadSessions = pgTable(
       .references(() => files.id, { onDelete: 'cascade' }),
     status: uploadSessionStatus('status').notNull().default('pending'),
     /**
-     * Share configuration requested when the upload began, applied when it
-     * completes. Kept here rather than on `files` because it describes the link
-     * Toran is about to create, not the stored object. The password is already
-     * an Argon2id hash: plaintext never reaches the database.
+     * Vestigial. These held the link configuration requested when an upload
+     * began, back when completing that upload also minted the link. A link may
+     * now serve several files, so it cannot exist until all of them are stored:
+     * `POST /api/shares` takes these settings instead, and the upload path
+     * writes NULL here.
+     *
+     * Kept because migrations are additive and forward-only; dropping a column
+     * is a deliberate, separately announced change. Nothing in the application
+     * reads them.
      */
     sharePasswordHash: text('share_password_hash'),
     shareMaxDownloads: integer('share_max_downloads'),
@@ -152,37 +157,75 @@ export const uploadSessions = pgTable(
   ],
 );
 
+/**
+ * A link. The files it serves live in `share_link_files`.
+ *
+ * `max_downloads` is a budget *per file*, not for the link as a whole: a
+ * recipient exhausting one file must not make the others unreachable.
+ */
 export const shareLinks = pgTable(
   'share_links',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    fileId: uuid('file_id')
-      .notNull()
-      .references(() => files.id, { onDelete: 'cascade' }),
     /** SHA-256 of the raw token. The raw token is never stored. */
     tokenHash: text('token_hash').notNull(),
     passwordHash: text('password_hash'),
     expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }),
     maxDownloads: integer('max_downloads'),
-    downloadCount: integer('download_count').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'date' }),
   },
   (table) => [
     uniqueIndex('share_links_token_hash_unique').on(table.tokenHash),
-    index('share_links_file_id_idx').on(table.fileId),
     index('share_links_expires_at_idx')
       .on(table.expiresAt)
       .where(sql`${table.revokedAt} is null and ${table.expiresAt} is not null`),
-    check('share_links_download_count_non_negative', sql`${table.downloadCount} >= 0`),
     check(
       'share_links_max_downloads_positive',
       sql`${table.maxDownloads} is null or ${table.maxDownloads} > 0`,
     ),
-    // Database-level backstop for the atomic reservation in `reserveDownload`.
-    // Even a buggy or malicious writer cannot push the counter past the limit.
+  ],
+);
+
+/**
+ * The files a link serves, one row each, each with its own download budget.
+ *
+ * `max_downloads` is copied from the link rather than joined to. A CHECK may
+ * only reference its own row, and keeping the limit enforceable *by the
+ * database* - not merely by the UPDATE in `reserveDownload` - is the point of
+ * the constraint below. Both columns are written once when the link is created
+ * and never updated, so the copy cannot drift.
+ */
+export const shareLinkFiles = pgTable(
+  'share_link_files',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shareLinkId: uuid('share_link_id')
+      .notNull()
+      .references(() => shareLinks.id, { onDelete: 'cascade' }),
+    fileId: uuid('file_id')
+      .notNull()
+      .references(() => files.id, { onDelete: 'cascade' }),
+    /** Order the uploader chose, so the download page is not arbitrary. */
+    position: integer('position').notNull().default(0),
+    maxDownloads: integer('max_downloads'),
+    downloadCount: integer('download_count').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    // One row per file per link: a duplicated file cannot get two budgets.
+    uniqueIndex('share_link_files_link_file_unique').on(table.shareLinkId, table.fileId),
+    index('share_link_files_link_idx').on(table.shareLinkId),
+    index('share_link_files_file_idx').on(table.fileId),
+    check('share_link_files_download_count_non_negative', sql`${table.downloadCount} >= 0`),
     check(
-      'share_links_within_download_limit',
+      'share_link_files_max_downloads_positive',
+      sql`${table.maxDownloads} is null or ${table.maxDownloads} > 0`,
+    ),
+    // Database-level backstop for the atomic reservation in `reserveDownload`.
+    // Even a buggy or malicious writer cannot push a counter past its limit.
+    check(
+      'share_link_files_within_download_limit',
       sql`${table.maxDownloads} is null or ${table.downloadCount} <= ${table.maxDownloads}`,
     ),
   ],
@@ -297,6 +340,7 @@ export type FileRow = typeof files.$inferSelect;
 export type NewFileRow = typeof files.$inferInsert;
 export type UploadSessionRow = typeof uploadSessions.$inferSelect;
 export type ShareLinkRow = typeof shareLinks.$inferSelect;
+export type ShareLinkFileRow = typeof shareLinkFiles.$inferSelect;
 export type DownloadEventRow = typeof downloadEvents.$inferSelect;
 export type JobRow = typeof jobs.$inferSelect;
 export type AbuseReportRow = typeof abuseReports.$inferSelect;

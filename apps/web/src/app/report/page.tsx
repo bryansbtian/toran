@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import type { Metadata } from 'next';
 import { getConfig } from '@toran/config';
 import { ReportForm } from '@/components/ReportForm';

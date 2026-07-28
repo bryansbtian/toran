@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { shareTokenSchema, ToranError, uuidSchema } from '@toran/shared';
 import {
   hashShareToken,
@@ -26,15 +26,16 @@ export const GET = handler<{ token: string }>(
   async (request, context, params) => {
     const token = shareTokenSchema.safeParse(params.token);
     if (!token.success) {
+      // Byte-for-byte the shape `toPublicView` produces for a link that cannot
+      // be served. A malformed token must be indistinguishable from a real one
+      // that was revoked, or this endpoint becomes a token-validity oracle.
       return json(
         {
-          filename: '',
-          size: 0,
           status: 'unavailable' as const,
           passwordProtected: false,
           authorized: false,
           expiresAt: null,
-          remainingDownloads: null,
+          files: [],
         },
         context,
       );

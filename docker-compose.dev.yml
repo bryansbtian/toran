@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-License-Identifier: MIT
 #
 # Development infrastructure only: PostgreSQL, MinIO and ClamAV.
 # The Toran web app and worker run on the host via `npm run dev`.
@@ -45,7 +45,10 @@ services:
       # Browsers PUT directly to MinIO, so it must accept our origin.
       MINIO_API_CORS_ALLOW_ORIGIN: ${TORAN_APP_URL:-http://localhost:3000}
     ports:
-      - '127.0.0.1:9000:9000'
+      # Loopback by default. `npm run dev` sets MINIO_BIND_ADDRESS=0.0.0.0 so
+      # browsers on other machines can follow a download redirect here.
+      - '${MINIO_BIND_ADDRESS:-127.0.0.1}:9000:9000'
+      # The console stays on loopback either way; it is an admin surface.
       - '127.0.0.1:9001:9001'
     volumes:
       - toran-dev-minio:/data

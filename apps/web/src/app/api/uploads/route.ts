@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { createUploadRequestSchema } from '@toran/shared';
 import { assertSameOrigin, enforceRateLimit, handler, json, readJson } from '@/server/http';
 import { beginUpload } from '@/server/uploads';

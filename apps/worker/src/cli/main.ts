@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { eq } from 'drizzle-orm';
@@ -189,7 +189,7 @@ async function showFile(runtime: Runtime, args: Args): Promise<number> {
   console.log(`\n${shares.length} share link(s):`);
   for (const share of shares) {
     console.log(
-      `  ${share.id}  downloads=${share.downloadCount}/${share.maxDownloads ?? '∞'}  ` +
+      `  ${share.id}  limit=${share.maxDownloads ?? '∞'}/file  ` +
         `password=${share.passwordHash ? 'yes' : 'no'}  ` +
         `expires=${share.expiresAt?.toISOString() ?? 'never'}  ` +
         `revoked=${share.revokedAt ? share.revokedAt.toISOString() : 'no'}`,
@@ -219,12 +219,14 @@ async function showLink(runtime: Runtime, args: Args): Promise<number> {
   // The raw token is deliberately not echoed, so it cannot end up in a shell
   // history dump, a screenshot, or a support ticket.
   console.log(`share link id       ${found.share.id}`);
-  console.log(`file id             ${found.file.id}`);
-  console.log(`file status         ${found.file.status}`);
-  console.log(`filename            ${found.file.normalizedFilename}`);
-  console.log(
-    `downloads           ${found.share.downloadCount}/${found.share.maxDownloads ?? '∞'}`,
-  );
+  console.log(`files               ${found.files.length}`);
+  // Budgets are per file, so each one is listed with its own spend.
+  for (const { file, entry } of found.files) {
+    console.log(
+      `  ${file.id}  ${entry.downloadCount}/${entry.maxDownloads ?? '∞'}  ` +
+        `${file.status}  ${file.normalizedFilename}`,
+    );
+  }
   console.log(`password protected  ${found.share.passwordHash ? 'yes' : 'no'}`);
   console.log(`expires             ${found.share.expiresAt?.toISOString() ?? '(never)'}`);
   console.log(`revoked             ${found.share.revokedAt?.toISOString() ?? '(no)'}`);

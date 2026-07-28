@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 import { ConfigurationError, loadConfig } from './index.js';
 import { parseRateLimitRule } from './parsers.js';
@@ -84,20 +84,40 @@ describe('loadConfig', () => {
     expect(() => load({ ...productionBase, ...overrides })).toThrow(ConfigurationError);
   });
 
-  it('downgrades production failures to warnings behind the explicit escape hatch', () => {
-    const warnings: string[] = [];
-    const config = loadConfig({
-      source: {
-        ...base,
+  it('reports every production problem at once rather than one per restart', () => {
+    try {
+      load({
         ...productionBase,
         TORAN_SECURE_COOKIES: 'false',
-        TORAN_ALLOW_INSECURE_PRODUCTION: 'true',
-      },
-      skipDotenv: true,
-      onWarning: (message) => warnings.push(message),
-    });
-    expect(config.isProduction).toBe(true);
-    expect(warnings.some((w) => w.includes('TORAN_SECURE_COOKIES'))).toBe(true);
+        TORAN_RATE_LIMIT_BACKEND: 'memory',
+      });
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigurationError);
+      const variables = (error as ConfigurationError).issues.map((issue) => issue.variable);
+      expect(variables).toContain('TORAN_SECURE_COOKIES');
+      expect(variables).toContain('TORAN_RATE_LIMIT_BACKEND');
+    }
+  });
+
+  it('has no escape hatch: an unknown override cannot downgrade a production failure', () => {
+    // `TORAN_ALLOW_INSECURE_PRODUCTION` used to turn these into warnings. It was
+    // removed for the first public release; setting it must now do nothing at
+    // all, which is what this asserts rather than merely that it is unparsed.
+    const warnings: string[] = [];
+    expect(() =>
+      loadConfig({
+        source: {
+          ...base,
+          ...productionBase,
+          TORAN_SECURE_COOKIES: 'false',
+          TORAN_ALLOW_INSECURE_PRODUCTION: 'true',
+        },
+        skipDotenv: true,
+        onWarning: (message) => warnings.push(message),
+      }),
+    ).toThrow(ConfigurationError);
+    expect(warnings).toEqual([]);
   });
 
   it('never places the database url in the thrown message', () => {

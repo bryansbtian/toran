@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { config as loadDotenv } from 'dotenv';
@@ -228,17 +228,12 @@ export function loadConfig(options: LoadConfigOptions = {}): ToranConfig {
   const fatal = collectUniversalIssues(raw);
   if (fatal.length > 0) throw new ConfigurationError(fatal);
 
+  // Production fails closed, unconditionally. There is deliberately no flag
+  // that turns these into warnings: an operator who could set one would set it
+  // exactly when the checks were about to do their job.
   if (raw.NODE_ENV === 'production') {
     const issues = collectProductionIssues(raw);
-    if (issues.length > 0) {
-      if (raw.TORAN_ALLOW_INSECURE_PRODUCTION) {
-        for (const issue of issues) {
-          warn(`[toran:config] INSECURE PRODUCTION SETTING ${issue.variable}: ${issue.message}`);
-        }
-      } else {
-        throw new ConfigurationError(issues);
-      }
-    }
+    if (issues.length > 0) throw new ConfigurationError(issues);
   }
 
   if (!raw.TORAN_SCANNING_ENABLED) {

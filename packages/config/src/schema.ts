@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { z } from 'zod';
 import {
   booleanFromEnv,
@@ -23,7 +23,6 @@ export const envSchema = z.object({
   TORAN_SECRET_KEY: z.string().min(1, 'TORAN_SECRET_KEY is required'),
   TORAN_SECURE_COOKIES: booleanFromEnv(false),
   TORAN_ABUSE_CONTACT_EMAIL: stringFromEnv('abuse@example.invalid'),
-  TORAN_ALLOW_INSECURE_PRODUCTION: booleanFromEnv(false),
 
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   DATABASE_POOL_MAX: int(10, 1, 200),

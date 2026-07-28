@@ -1,10 +1,10 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-License-Identifier: MIT -->
 
 # ClamAV in Toran
 
 Toran runs ClamAV as a standalone container and talks to `clamd` over TCP using
 the `INSTREAM` protocol. The client is implemented directly in
-`apps/worker/src/scanning/clamav.ts` — the protocol is a handful of commands,
+`apps/worker/src/scanning/clamav.ts` - the protocol is a handful of commands,
 and keeping it dependency-free matters in the one component that handles hostile
 input.
 

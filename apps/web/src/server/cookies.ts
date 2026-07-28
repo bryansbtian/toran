@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import 'server-only';
 import type { ToranConfig } from '@toran/config';
 
@@ -19,9 +19,16 @@ export function readCookie(request: Request, name: string): string | null {
  * Serialises a download-authorisation cookie.
  *
  * `HttpOnly` keeps it out of reach of script, `SameSite=Strict` means it is not
- * sent on any cross-site navigation, and `Path` scopes it to the share route so
- * it is not attached to unrelated requests. `Secure` follows configuration and
- * is mandatory in production.
+ * sent on any cross-site navigation, and `Secure` follows configuration and is
+ * mandatory in production.
+ *
+ * `Path=/` is deliberate rather than an oversight: the page that needs the
+ * grant (`/s/{token}`) and the endpoint that consumes it
+ * (`/api/shares/{token}/download`) live under different prefixes, so a narrower
+ * path would simply stop the cookie being sent. Scoping instead comes from the
+ * name and the signature: the cookie name embeds the share-link id and the
+ * grant is HMAC-bound to that same id, so a grant for one link is rejected on
+ * every other link (see `verifyDownloadGrant`).
  */
 export function buildGrantCookie(
   config: ToranConfig,

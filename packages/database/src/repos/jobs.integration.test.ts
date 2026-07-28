@@ -1,6 +1,11 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createTestDatabase, isDatabaseReachable, type TestDatabase } from '../testing/harness.js';
+import {
+  allowIntegrationSkip,
+  createTestDatabase,
+  isDatabaseReachable,
+  type TestDatabase,
+} from '../testing/harness.js';
 import {
   claimJobs,
   completeJob,
@@ -14,7 +19,7 @@ import {
 } from './jobs.js';
 import { PostgresRateLimiter } from '../ratelimit.js';
 
-const reachable = await isDatabaseReachable();
+const reachable = allowIntegrationSkip(await isDatabaseReachable(), 'job-queue integration tests');
 const suite = reachable ? describe : describe.skip;
 
 let test$: TestDatabase;

@@ -1,17 +1,21 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-License-Identifier: MIT -->
 
 # Toran threat model
 
 Each threat below records four things: the **risk**, the **mitigation** Toran
 implements, the **remaining limitation** after that mitigation, and a
-**future improvement**. The remaining limitations are the honest part — read
+**future improvement**. The remaining limitations are the honest part - read
 them.
 
 ## Core assumption
 
-**The share URL is a capability.** Anyone holding it can download the file,
-subject to the link's own limits. Toran protects the URL; it cannot protect a
-user who posts it publicly.
+**The share URL is a capability.** Anyone holding it can download every file
+behind it, subject to the link's own limits. Toran protects the URL; it cannot
+protect a user who posts it publicly.
+
+A link may serve up to 20 files. Link-level controls - revocation, expiry,
+password - apply to all of them at once; download budgets and scan state apply
+to each file separately. Both distinctions matter below.
 
 ## Assets
 
@@ -27,14 +31,14 @@ user who posts it publicly.
 
 ## Adversaries
 
-1. **Opportunistic scanner** — automated, untargeted, high volume.
-2. **Malicious uploader** — using Toran to distribute malware, phishing, or
+1. **Opportunistic scanner** - automated, untargeted, high volume.
+2. **Malicious uploader** - using Toran to distribute malware, phishing, or
    illegal content.
-3. **Link guesser** — trying to enumerate other people's files.
-4. **Resource abuser** — exhausting storage or bandwidth.
-5. **Network observer** — on the path between browser and server.
-6. **Compromised dependency** — malicious code in the supply chain.
-7. **Curious operator** — has legitimate infrastructure access. **Toran does not
+3. **Link guesser** - trying to enumerate other people's files.
+4. **Resource abuser** - exhausting storage or bandwidth.
+5. **Network observer** - on the path between browser and server.
+6. **Compromised dependency** - malicious code in the supply chain.
+7. **Curious operator** - has legitimate infrastructure access. **Toran does not
    defend against this one**; see "no end-to-end encryption".
 
 ---
@@ -62,10 +66,20 @@ network egress; add per-scan resource limits.
 
 **Risk.** Toran becomes a delivery host for malware.
 
-**Mitigation.** Every upload is streamed to ClamAV before a link will serve it.
-Scanning **fails closed**: a file becomes `ready` only on an explicit clean
-verdict. Scanner outages leave files in `scanning`, not available. Infected
-files are blocked, their links revoked, and the object quarantined or deleted.
+**Mitigation.** Every upload is streamed to ClamAV before a link will serve it,
+each file of a link independently. Scanning **fails closed** in three separate
+ways: a file becomes `ready` only on clamd's exact `stream: OK` reply, any other
+reply is an error rather than a pass, and a stream that ends short of the
+object's recorded size is refused outright rather than having a prefix blessed
+as clean. Scanner outages leave files in `scanning`, not available.
+
+An infected file is blocked, the object quarantined or deleted, and **every
+link that serves it revoked** - clean siblings on the same link included. A
+batch that carried malware is not one Toran keeps distributing, and a
+recipient's access to a clean sibling is worth less than that. A file that
+merely fails to scan is different: it stops being downloadable, but it does not
+revoke anything.
+
 `freshclam` keeps signatures current. The download page states plainly that
 scanning is not a guarantee.
 
@@ -80,11 +94,19 @@ behavioural scanning service, kept optional so Toran stays free to run.
 
 **Risk.** An attacker guesses share tokens to find other people's files.
 
-**Mitigation.** Tokens are 24 cryptographically random bytes — 192 bits, well
-above the 128-bit floor — encoded URL-safe. Guessing is not feasible even
-without rate limiting. Download attempts are rate limited anyway. Missing,
-revoked, expired, exhausted, blocked and deleted links all return the same
-uniform "unavailable" shape, so the endpoint is not an existence oracle.
+**Mitigation.** Tokens are 24 cryptographically random bytes (192 bits, well
+above the 128-bit floor), encoded URL-safe. Guessing is not feasible even
+without rate limiting. Download attempts are rate limited anyway. Malformed,
+missing, revoked, expired, exhausted, blocked and deleted links all return the
+same uniform "unavailable" shape with an empty `files` array, so the endpoint is
+not an existence oracle.
+
+**File ids are not a second way in.** A link resolves to its files; a file id
+does not resolve to a link. Asking to download a file id that is not behind the
+token you hold is `NOT_FOUND`, and `POST /api/shares` refuses to put a file
+behind a new link without a manage grant proving the caller uploaded it - so a
+guessed file id cannot be re-shared under an attacker's own password and expiry.
+Both cases return the same code as a file that does not exist.
 
 **Remaining limitation.** A correct token always works; that is the design.
 
@@ -96,18 +118,31 @@ uniform "unavailable" shape, so the endpoint is not an existence oracle.
 
 **Mitigation.** The raw token is returned exactly once, in the creation
 response. Only its SHA-256 is stored. It is never logged (the logger redacts by
-key name and value pattern), never placed in a job payload, and never
-server-rendered — the share page is a client shell that fetches metadata itself.
-`Referrer-Policy: no-referrer` is set globally. The download URL is delivered in
-a JSON body, not a redirect, so it does not enter history.
+key name and value pattern) and never placed in a job payload. The share page
+renders no link detail server-side: it is a client shell that fetches metadata
+from `/api/shares/{token}` itself, so nothing about the file is in the initial
+HTML. `Referrer-Policy: no-referrer` is set globally, and share pages are
+`Cache-Control: no-store`. The download URL is delivered in a JSON body, not a
+redirect, so it does not enter history.
 
 **Remaining limitation.** The token is in the URL, so it will appear in the
 user's own browser history, in any screenshot, and in whatever channel they use
 to share it. TLS protects it on the wire; nothing protects a user who pastes it
 into a public forum.
 
-**Future improvement.** Optional fragment-based tokens (`/s/#token`), which are
-never sent to the server at all.
+Because `/s/[token]` is a dynamic route, Next.js also serialises the request's
+own URL into the React Server Component payload embedded in that page's HTML.
+The token is therefore present in the response body, not only in the request
+line. This discloses nothing to a party who did not already hold the token - the
+response is uncacheable and goes only to the client that asked for it - but it
+does mean the token reaches anything that records **response** bodies, not just
+request URLs: an intermediary doing content inspection, a saved page, a browser
+extension. Do not read "the share page is a client shell" as "the token is
+absent from the HTML"; it is not.
+
+**Future improvement.** Fragment-based tokens (`/s/#token`) would remove both
+the request-line and the response-body exposure at once, because a fragment is
+never sent to the server and never enters a route parameter.
 
 ## 5. Database leakage
 
@@ -142,7 +177,7 @@ only) and worker (read/delete), plus support for assumed roles.
 
 **Risk.** A signed URL is captured and reused.
 
-**Mitigation.** Short lifetimes — 120 seconds for downloads, 15 minutes for
+**Mitigation.** Short lifetimes - 120 seconds for downloads, 15 minutes for
 uploads. Scoped to a single object and method. Never logged. Delivered in a
 response body rather than a redirect.
 
@@ -160,12 +195,17 @@ already exists for this.
 **Risk.** An attacker guesses a link's password.
 
 **Mitigation.** Argon2id at the OWASP-recommended profile (19 MiB, t=2, p=1),
-which makes each guess expensive. Attempts are rate limited **twice** — per link
-and per client — so a distributed attacker cannot trade addresses for attempts
+which makes each guess expensive. Attempts are rate limited **twice**, per link
+and per client, so a distributed attacker cannot trade addresses for attempts
 against one link. Errors are generic. A nonexistent or password-free link still
 runs a decoy Argon2id verification, so response time does not reveal which case
 occurred. Success resets the link's attempt budget so a legitimate visitor is
 not locked out by someone else's failures.
+
+**Scope.** A password protects the **link**, not individual files. There is one
+password per link and authorising once unlocks every file behind it. A visitor
+who should see only some of the files needs a second link, not a second
+password.
 
 **Remaining limitation.** A weak, guessable password is still weak. Toran
 enforces only an 8-character minimum.
@@ -186,6 +226,13 @@ occupy an app process.
 **Remaining limitation.** Toran has no network-layer DDoS protection; that is
 the job of the reverse proxy or CDN in front of it. The rotating client
 identifier means a distributed attacker gets a fresh budget per address.
+
+`GET /api/shares/{token}` - the link-metadata lookup - is deliberately **not**
+rate limited. The share page polls it every three seconds while a file is being
+scanned, and any limit low enough to matter would break that. It costs one
+indexed primary-key lookup and returns a fixed-size body, but it is the one
+public endpoint an attacker can call without budget. Put a limit on it at the
+reverse proxy if you expect hostile traffic.
 
 **Future improvement.** Documented fail2ban and CDN rules; optional proof-of-work
 on upload creation.
@@ -210,12 +257,15 @@ account requirement above a size threshold.
 
 **Risk.** Toran is used to serve high-bandwidth content at the operator's cost.
 
-**Mitigation.** Download rate limiting; optional per-link download caps; expiry
-on every link; downloads served by storage, so provider-level bandwidth controls
-apply directly.
+**Mitigation.** Download rate limiting; an optional download cap, budgeted per
+file; expiry on every link; downloads served by storage, so provider-level
+bandwidth controls apply directly.
 
 **Remaining limitation.** An unlimited link with a long expiry can be shared
-widely. Toran cannot distinguish popular from abusive.
+widely. Toran cannot distinguish popular from abusive. A per-file budget also
+means a cap of _n_ on a link of _k_ files permits _n × k_ downloads in total,
+not _n_ - deliberate, so one recipient cannot lock the others out, but worth
+knowing when sizing the cap.
 
 **Future improvement.** Per-link bandwidth accounting and an optional default
 download cap.
@@ -231,7 +281,7 @@ extension spoofing, replaces characters hostile in paths or headers, rejects
 pure-dot and reserved device names, strips leading dots, and caps length while
 preserving the extension. `Content-Disposition` uses RFC 6266 with an
 aggressively sanitised ASCII fallback and a percent-encoded `filename*`.
-Crucially, **the filename never influences the storage key** — keys are random.
+Crucially, **the filename never influences the storage key** - keys are random.
 
 **Remaining limitation.** Homoglyph and mixed-script names can still mislead a
 human reader.
@@ -243,7 +293,7 @@ human reader.
 **Risk.** A file is served in a way that makes a browser execute it.
 
 **Mitigation.** Active formats (HTML, SVG, XML, XSLT, JS, PDF, and their
-extensions) are downgraded to `application/octet-stream` at upload time — the
+extensions) are downgraded to `application/octet-stream` at upload time - the
 stored type, not just the served one. Everything is served as an attachment.
 `X-Content-Type-Options: nosniff` everywhere. A separate download hostname is
 recommended and documented, so even a successful bypass executes on an origin
@@ -259,11 +309,15 @@ at start-up when it is not configured.
 
 **Risk.** Concurrent requests bypass a limit or corrupt state.
 
-**Mitigation.** See [ARCHITECTURE.md](ARCHITECTURE.md#concurrency). The download
-limit is one atomic statement plus a database CHECK. Job claiming uses
-`FOR UPDATE SKIP LOCKED`. Upload completion is idempotent under a row lock.
-Revocation, deletion and object removal are all idempotent. Integration tests
-exercise the concurrency directly rather than asserting on mocks.
+**Mitigation.** See [ARCHITECTURE.md](ARCHITECTURE.md#concurrency). A file's
+download budget is claimed by one atomic statement, backed by the
+`share_link_files_within_download_limit` CHECK; the same statement re-asserts
+the link's revocation and expiry state and the file's readiness, so neither can
+be raced past. Job claiming uses `FOR UPDATE SKIP LOCKED`. Upload completion is
+idempotent under a row lock. A link and its file rows are written in one
+transaction, so a link that resolves to nothing cannot exist. Revocation,
+deletion and object removal are all idempotent. Integration tests exercise the
+concurrency directly rather than asserting on mocks.
 
 **Remaining limitation.** The presigned-URL window (threat 7) means the download
 counter is exact but the _effective_ downloads are not.
@@ -304,7 +358,7 @@ at start-up.
 
 **Risk.** Script executes on the Toran origin.
 
-**Mitigation.** **No uploaded content is ever rendered on the app origin** —
+**Mitigation.** **No uploaded content is ever rendered on the app origin** -
 that removes the whole category. React escapes output by default. A strict CSP
 is set at request time (`default-src 'self'`, `object-src 'none'`,
 `base-uri 'none'`, `frame-ancestors 'none'`). The only `dangerouslySetInnerHTML`
@@ -323,12 +377,18 @@ the App Router.
 **Risk.** A hostile site makes a victim's browser perform a Toran mutation.
 
 **Mitigation.** Every mutating endpoint validates the `Origin` header. Grant
-cookies are `HttpOnly`, `SameSite=Strict`, path-scoped, and bound to a specific
-share-link id, so they cannot be replayed against another link. Management
-operations require a signed grant delivered in a header, which a cross-site form
-cannot set.
+cookies are `HttpOnly` and `SameSite=Strict`, and each one is HMAC-bound to a
+specific share-link id, so it cannot be replayed against another link.
+Management operations require a signed grant delivered in a header, which a
+cross-site form cannot set.
 
-**Remaining limitation.** A non-browser client can send any `Origin` — but such
+Grant cookies are sent with `Path=/` rather than a narrower path: the page that
+needs the grant and the endpoint that consumes it are under different prefixes,
+so a narrower path would stop the cookie being sent at all. Isolation between
+links comes from the per-link cookie name and the per-link signature, not from
+the path.
+
+**Remaining limitation.** A non-browser client can send any `Origin` - but such
 a client cannot use a victim's cookies, which is what CSRF is about.
 
 **Future improvement.** Double-submit tokens if cookie-authenticated user
@@ -341,7 +401,7 @@ accounts are added.
 **Mitigation.** `package-lock.json` is committed and CI uses `npm ci`
 exclusively. Dependabot groups and proposes updates. CI runs dependency review,
 `npm audit` on production dependencies, CodeQL, container scanning, and SBOM
-generation. The dependency surface is kept deliberately small — the ClamAV
+generation. The dependency surface is kept deliberately small - the ClamAV
 client and the cookie parser are implemented directly rather than pulled in, and
 Argon2id uses a pure-WASM implementation with no native build step.
 
@@ -364,7 +424,7 @@ identifier for a limited window.
 
 **Remaining limitation.** Toran does not perform proactive content matching
 (no PhotoDNA, no hash-list checking). Rotating identifiers deliberately limit
-how far an uploader can be traced — a privacy choice with an abuse cost.
+how far an uploader can be traced - a privacy choice with an abuse cost.
 
 **Future improvement.** Optional known-hash blocklist integration; an
 administrative queue for reported content; documented legal-request process.

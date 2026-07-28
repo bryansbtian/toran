@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-License-Identifier: MIT -->
 
 # Storage configuration
 
@@ -156,6 +156,6 @@ without changing any caller.
 
 Toran sets the download filename with `ResponseContentDisposition` on the
 presigned `GET`. Most providers honour it. If yours does not, downloads will use
-the random object id as the filename — please open an issue naming the provider.
+the random object id as the filename - please open an issue naming the provider.
 
 Verified working: MinIO, AWS S3, Cloudflare R2, Backblaze B2.

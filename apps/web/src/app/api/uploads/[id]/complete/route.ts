@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { completeUploadRequestSchema, ToranError, uuidSchema } from '@toran/shared';
 import { assertSameOrigin, enforceRateLimit, handler, json, readJson } from '@/server/http';
 import { finishUpload } from '@/server/uploads';
@@ -9,8 +9,9 @@ export const runtime = 'nodejs';
 /**
  * POST /api/uploads/{id}/complete
  *
- * Idempotent: repeating this call returns the same share link and never
- * enqueues a second scan job.
+ * Idempotent: repeating this call returns the same file and never enqueues a
+ * second scan job. No link is created here - see `POST /api/shares`, which
+ * mints one over every file of the batch once they have all been stored.
  */
 export const POST = handler<{ id: string }>(
   'POST /api/uploads/[id]/complete',
@@ -33,9 +34,9 @@ export const POST = handler<{ id: string }>(
     return json(
       {
         file: result.file,
-        share: result.share,
+        // Proves the caller uploaded this file, and is what `POST /api/shares`
+        // requires before it will put the file behind a link.
         manageKey: result.manageKey,
-        shareManageKey: result.shareManageKey,
       },
       context,
       { status: result.created ? 201 : 200 },

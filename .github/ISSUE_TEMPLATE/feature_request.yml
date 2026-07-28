@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-License-Identifier: MIT
 name: Feature request
 description: Suggest a capability Toran does not have yet.
 labels: ['enhancement', 'needs-triage']

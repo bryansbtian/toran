@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Toran - open-source, self-hostable secure file sharing.",
-  "license": "AGPL-3.0-only",
+  "license": "MIT",
   "type": "module",
   "packageManager": "npm@11.6.0",
   "engines": {
@@ -15,10 +15,12 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "turbo run dev",
+    "dev": "node scripts/dev-lan.mjs",
+    "dev:local": "turbo run dev",
     "dev:infra": "docker compose -f docker-compose.dev.yml up -d",
     "dev:infra:down": "docker compose -f docker-compose.dev.yml down",
     "dev:setup": "node scripts/dev-setup.mjs",
+    "dev:lan": "node scripts/dev-lan.mjs",
     "build": "turbo run build",
     "start": "npm run start --workspace=@toran/web",
     "lint": "turbo run lint",
@@ -33,7 +35,8 @@
     "db:seed": "npm run db:seed --workspace=@toran/database",
     "db:studio": "npm run db:studio --workspace=@toran/database",
     "admin": "npm run admin --workspace=@toran/worker",
-    "secrets:scan": "node scripts/check-secrets.mjs"
+    "secrets:scan": "node scripts/check-secrets.mjs",
+    "audit:prod": "node scripts/audit-production.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { ToranError, uuidSchema } from '@toran/shared';
 import { MANAGE_GRANT_HEADER, verifyGrant } from '@toran/security';
 import { findUploadSession } from '@toran/database';

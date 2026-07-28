@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-License-Identifier: MIT
 name: Supply chain
 
 on:
@@ -26,11 +26,20 @@ jobs:
         with:
           fail-on-severity: high
           comment-summary-in-pr: always
-          # Toran is AGPL-3.0-only. These licences cannot be combined with it.
+          # Toran's dependency policy rejects GPL and AGPL dependencies so that
+          # the distributed application can remain compatible with the project's
+          # intended permissive licensing model. That is a project decision
+          # about what Toran ships, not legal advice.
+          # LGPL is deliberately NOT denied - it is designed to be used from a
+          # differently licensed work, and Toran already depends on LGPL native
+          # binaries through sharp. See docs/LICENSING.md.
           # This is an automated first pass, NOT a legal review - see
           # docs/LICENSING.md before any commercial launch.
           deny-licenses: >-
             AGPL-1.0-only, AGPL-1.0-or-later,
+            AGPL-3.0-only, AGPL-3.0-or-later,
+            GPL-2.0-only, GPL-2.0-or-later,
+            GPL-3.0-only, GPL-3.0-or-later,
             SSPL-1.0,
             BUSL-1.1,
             Elastic-2.0,
@@ -48,10 +57,23 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci --no-audit --no-fund
+
+      # Fails on any high or critical advisory in a shipping dependency that has
+      # not been individually reviewed. The reviewed exceptions, and why each
+      # vulnerable path is unreachable from Toran, are in the script itself.
+      #
+      # A bare `npm audit --omit=dev --audit-level=high` used to run here. It
+      # cannot distinguish "nothing to fix" from "cannot be fixed yet": Next.js
+      # currently pins a vulnerable postcss and ships a vulnerable sharp, with no
+      # released Next version that does otherwise, so the step was red on every
+      # pull request regardless of what the pull request changed.
       - name: Audit production dependencies
-        # Advisory: dev-only advisories should not block a release, but a high
-        # severity issue in something that ships must.
-        run: npm audit --omit=dev --audit-level=high
+        run: npm run audit:prod
+
+      # Dev-only advisories are reported but do not block: they cannot reach a
+      # deployed instance.
+      - name: Report development advisories (non-blocking)
+        run: npm audit --audit-level=high || true
 
   sbom:
     name: Software bill of materials
@@ -65,8 +87,11 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
 
+      # Pinned, not `@latest`. `npx --yes` executes whatever the registry
+      # serves, so an unpinned tool is an unreviewed dependency running with
+      # this workflow's token on every push. Bump it deliberately.
       - name: Generate a CycloneDX SBOM
-        run: npx --yes @cyclonedx/cyclonedx-npm@latest --output-file sbom.cdx.json --omit dev
+        run: npx --yes @cyclonedx/cyclonedx-npm@6.0.0 --output-file sbom.cdx.json --omit dev
 
       - name: Upload the SBOM
         uses: actions/upload-artifact@v4
@@ -87,5 +112,8 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
 
+      # Pinned for the same reason as the SBOM tool above.
       - name: List production dependency licences
-        run: npx --yes license-checker-rseidelsohn --production --summary --excludePrivatePackages
+        run: >-
+          npx --yes license-checker-rseidelsohn@5.0.1
+          --production --summary --excludePrivatePackages

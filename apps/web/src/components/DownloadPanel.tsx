@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 'use client';
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
@@ -15,6 +15,8 @@ export function DownloadPanel({ token }: { readonly token: string }) {
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
+  /** Which file's download is in flight, so only that button shows a spinner. */
+  const [busyFileId, setBusyFileId] = useState<string | null>(null);
   const [downloaded, setDownloaded] = useState(false);
   const pollRef = useRef<number | null>(null);
 
@@ -33,15 +35,21 @@ export function DownloadPanel({ token }: { readonly token: string }) {
     void load();
   }, [load]);
 
-  // While a file is being scanned the page polls, so a visitor who arrives
-  // immediately after upload sees the link become usable without reloading.
+  // Polls while anything is still being scanned, so a visitor who arrives
+  // immediately after upload sees files become downloadable without reloading.
+  // A link with one ready file and one still scanning reports itself as ready,
+  // so the link's own status is not enough to decide whether to keep polling.
+  const scanning =
+    share?.status === 'scanning' ||
+    (share?.files.some((file) => file.status === 'scanning') ?? false);
+
   useEffect(() => {
-    if (share?.status !== 'scanning') return;
+    if (!scanning) return;
     pollRef.current = window.setInterval(() => void load(), 3000);
     return () => {
       if (pollRef.current !== null) window.clearInterval(pollRef.current);
     };
-  }, [share?.status, load]);
+  }, [scanning, load]);
 
   const authorize = async () => {
     setPasswordError(null);
@@ -59,11 +67,11 @@ export function DownloadPanel({ token }: { readonly token: string }) {
     }
   };
 
-  const download = async () => {
+  const download = async (fileId: string) => {
     setError(null);
-    setWorking(true);
+    setBusyFileId(fileId);
     try {
-      const result = await requestDownload(token);
+      const result = await requestDownload(token, fileId);
       setDownloaded(true);
       // Navigating rather than opening a tab keeps the presigned URL out of a
       // window Toran cannot control, and the storage response is an attachment.
@@ -73,7 +81,7 @@ export function DownloadPanel({ token }: { readonly token: string }) {
       setError(caught instanceof ApiError ? caught.message : 'The download could not start.');
       await load();
     } finally {
-      setWorking(false);
+      setBusyFileId(null);
     }
   };
 
@@ -122,10 +130,12 @@ export function DownloadPanel({ token }: { readonly token: string }) {
         <div className="flex items-center gap-3">
           <Spinner />
           <div>
-            <h1 className="text-xl font-semibold text-ink">Scanning this file</h1>
+            <h1 className="text-xl font-semibold text-ink">
+              {share.files.length > 1 ? 'Scanning these files' : 'Scanning this file'}
+            </h1>
             <p className="mt-1 text-sm text-ink-muted">
               Toran checks every upload for malware before it can be downloaded. This page updates
-              automatically.
+              automatically{share.files.length > 1 ? ', file by file' : ''}.
             </p>
           </div>
         </div>
@@ -171,20 +181,71 @@ export function DownloadPanel({ token }: { readonly token: string }) {
     );
   }
 
+  const files = share.files;
+  const many = files.length > 1;
+  const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+  const single = files[0];
+
   return (
     <Card>
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h1
             className="truncate text-2xl font-semibold tracking-tight text-ink"
-            title={share.filename}
+            title={many ? undefined : single?.filename}
           >
-            {share.filename}
+            {many ? `${files.length} files` : (single?.filename ?? '')}
           </h1>
-          <p className="mt-2 text-sm text-ink-muted">{formatBytes(share.size)}</p>
+          <p className="mt-2 text-sm text-ink-muted">
+            {formatBytes(totalBytes)}
+            {many ? ' total · pick the ones you want' : ''}
+          </p>
         </div>
         <Badge tone="success">Ready</Badge>
       </div>
+
+      <ul className="mt-6 space-y-2 border-t border-line pt-6" data-testid="share-files">
+        {files.map((file) => (
+          <li
+            key={file.fileId}
+            className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface-sunken px-4 py-3"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-ink" title={file.filename}>
+                {file.filename}
+              </p>
+              <p className="text-xs text-ink-muted">
+                {formatBytes(file.size)}
+                {file.remainingDownloads !== null ? (
+                  <span data-testid="remaining-downloads">
+                    {' · '}
+                    {file.remainingDownloads} download
+                    {file.remainingDownloads === 1 ? '' : 's'} left
+                  </span>
+                ) : null}
+              </p>
+            </div>
+            {file.status === 'ready' ? (
+              <Button
+                onClick={() => void download(file.fileId)}
+                loading={busyFileId === file.fileId}
+                disabled={busyFileId !== null}
+                data-testid="download"
+              >
+                Download
+                <span className="sr-only"> {file.filename}</span>
+              </Button>
+            ) : file.status === 'scanning' ? (
+              <Badge tone="warning">Scanning…</Badge>
+            ) : (
+              // Exhausted, blocked, expired or deleted all present the same way:
+              // the link already reveals that the file exists, and nothing more
+              // is owed to a visitor holding only the token.
+              <Badge tone="danger">Unavailable</Badge>
+            )}
+          </li>
+        ))}
+      </ul>
 
       <dl className="mt-6 grid grid-cols-1 gap-4 border-t border-line pt-6 sm:grid-cols-2">
         <div>
@@ -193,16 +254,6 @@ export function DownloadPanel({ token }: { readonly token: string }) {
             {share.expiresAt ? formatAbsolute(new Date(share.expiresAt)) : 'Never'}
           </dd>
         </div>
-        {share.remainingDownloads !== null ? (
-          <div>
-            <dt className="text-xs font-medium uppercase tracking-wide text-ink-subtle">
-              Downloads left
-            </dt>
-            <dd className="mt-1 text-sm text-ink" data-testid="remaining-downloads">
-              {share.remainingDownloads}
-            </dd>
-          </div>
-        ) : null}
       </dl>
 
       {error ? (
@@ -220,9 +271,6 @@ export function DownloadPanel({ token }: { readonly token: string }) {
       ) : null}
 
       <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-line pt-6">
-        <Button onClick={download} loading={working} data-testid="download">
-          Download
-        </Button>
         <Link
           href="/report"
           className="text-xs font-medium text-ink-muted underline underline-offset-2 hover:text-ink"

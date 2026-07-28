@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 /**
  * Single source of truth for Toran's public identity.
  *
@@ -17,7 +17,7 @@ export const branding = {
   /** Where the source lives. Update when forking. */
   repositoryUrl: 'https://github.com/toran-project/toran',
   documentationUrl: 'https://github.com/toran-project/toran/tree/main/docs',
-  license: 'AGPL-3.0-only',
+  license: 'MIT',
   /** Brand colours, mirrored by the Tailwind theme. */
   colors: {
     /** Deep teal. Primary actions and the logo mark. */

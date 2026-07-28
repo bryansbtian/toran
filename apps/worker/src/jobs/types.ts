@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { z } from 'zod';
 import type { ToranConfig } from '@toran/config';
 import type { Database, JobRow } from '@toran/database';

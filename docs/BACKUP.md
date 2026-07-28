@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-License-Identifier: MIT -->
 
 # Backup and recovery
 
@@ -6,8 +6,9 @@
 
 **Backing up PostgreSQL alone is not enough.** Toran's state is split:
 
-- **PostgreSQL** holds metadata — which link points to which object, its expiry,
-  its password hash, its download count.
+- **PostgreSQL** holds metadata - which files each link serves, in what order,
+  the link's expiry and password hash, and each file's own download budget and
+  spent count.
 - **Object storage** holds the actual file bytes.
 
 Restore only the database and you get links to objects that no longer exist.
@@ -24,7 +25,7 @@ the configuration that ties them together.
 | `TORAN_SECRET_KEY` | Signs grants and client identifiers | On change              | Indefinite, separate location |
 
 Losing `TORAN_SECRET_KEY` invalidates every outstanding password-authorisation
-grant (users re-enter passwords — survivable) and resets every anonymous quota
+grant (users re-enter passwords - survivable) and resets every anonymous quota
 identifier. **Back it up somewhere other than the database backup**, so one
 compromise does not yield both.
 
@@ -145,8 +146,10 @@ Database and storage backups are taken at slightly different moments, so a
 restore can be inconsistent in two ways:
 
 **Metadata without an object.** A file was uploaded after the storage snapshot.
-The `reconcile_storage` job detects this and marks the file `failed`, so the
-link reports unavailable rather than erroring.
+The `reconcile_storage` job detects this and marks the file `failed`, so that
+file reports unavailable rather than erroring. A link serving several files
+keeps serving the ones whose objects did restore - each file is judged on its
+own - so a partial restore degrades a link rather than breaking it outright.
 
 **Object without metadata.** A file was deleted after the storage snapshot. The
 object is orphaned; it is not reachable (keys are random and never listed), but
@@ -168,7 +171,7 @@ Quarterly, on a staging host:
 1. Restore the database dump into a fresh instance.
 2. Restore the storage bucket.
 3. Start Toran against them.
-4. `curl /api/ready` — everything green.
+4. `curl /api/ready` - everything green.
 5. Open a share link created before the backup, and download the file.
 6. Run reconciliation and check what it reports.
 7. Write down how long the whole thing took. That number is your RTO.

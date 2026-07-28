@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-License-Identifier: MIT -->
 
 # Observability
 
@@ -31,10 +31,10 @@ multi-line output, nothing that needs a parser you have to write.
 
 Two independent layers strip anything sensitive:
 
-1. **By key name** — `token`, `password`, `secret`, `accessKey`, `authorization`,
+1. **By key name** - `token`, `password`, `secret`, `accessKey`, `authorization`,
    `cookie`, `presignedUrl`, `databaseUrl` and their case/underscore/dash
    variants.
-2. **By value pattern** — anything containing `X-Amz-Signature`, a connection
+2. **By value pattern** - anything containing `X-Amz-Signature`, a connection
    string with inline credentials, or a PHC-encoded Argon2 hash.
 
 So a mistake at a call site degrades to `[redacted]` rather than a leak. Unit
@@ -60,8 +60,8 @@ docker compose logs web | grep 'L3xK9mQ2pRt7'
 
 | Endpoint                    | Purpose                                      | Touches dependencies |
 | --------------------------- | -------------------------------------------- | -------------------- |
-| `GET /api/health`           | Liveness — should this process be restarted? | No                   |
-| `GET /api/ready`            | Readiness — should it receive traffic?       | Yes                  |
+| `GET /api/health`           | Liveness - should this process be restarted? | No                   |
+| `GET /api/ready`            | Readiness - should it receive traffic?       | Yes                  |
 | `GET :3001/health` (worker) | Worker liveness                              | No                   |
 | `GET :3001/ready` (worker)  | Worker database connectivity                 | Yes                  |
 
@@ -86,7 +86,7 @@ Toran records counters and durations through a small in-process recorder:
 | `toran.ratelimit.rejected` | scope                 |
 
 The MVP does not expose a `/metrics` endpoint. Until it does, the log stream is
-the metrics source — every request and job logs its outcome and duration, which
+the metrics source - every request and job logs its outcome and duration, which
 is enough to build the dashboards below with any log-based aggregation.
 
 A Prometheus endpoint is on the roadmap.
@@ -107,7 +107,7 @@ npm install @opentelemetry/sdk-node @opentelemetry/auto-instrumentations-node \
 ```
 
 ```javascript
-// otel.mjs — load with: node --import ./otel.mjs apps/worker/dist/main.js
+// otel.mjs - load with: node --import ./otel.mjs apps/worker/dist/main.js
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
@@ -131,7 +131,7 @@ Ordered by how much it matters.
 | Alert                         | Condition                                 | Why                                                            |
 | ----------------------------- | ----------------------------------------- | -------------------------------------------------------------- |
 | Readiness failing             | `/api/ready` non-200 for 2 minutes        | Users cannot upload or download                                |
-| Worker down                   | Worker health failing for 5 minutes       | **Nothing becomes downloadable** — files pile up in `scanning` |
+| Worker down                   | Worker health failing for 5 minutes       | **Nothing becomes downloadable** - files pile up in `scanning` |
 | Dead jobs accumulating        | `jobs --failed` count rising              | Something is systematically failing                            |
 | Scanner unreachable           | `scanner error` in worker logs, sustained | Same effect as a dead worker                                   |
 | ClamAV signatures stale       | Age > 48 hours                            | Scanning is running but not catching anything new              |
@@ -175,5 +175,5 @@ services:
 Because output is already JSON, most collectors parse it without configuration.
 
 **Set a retention period.** Logs contain database ids, timing and rotating
-client identifiers — personal data in most jurisdictions. See
+client identifiers - personal data in most jurisdictions. See
 [PRIVACY.md](PRIVACY.md).

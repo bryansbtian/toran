@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 import {
   authorizeShareRequestSchema,
@@ -26,14 +26,16 @@ describe('createUploadRequestSchema', () => {
     expect(parsed.contentType).toBe('application/octet-stream');
   });
 
-  it('accepts all optional link settings', () => {
-    const parsed = createUploadRequestSchema.parse({
-      ...valid,
-      expiresInSeconds: 3600,
-      password: 'longenough',
-      maxDownloads: 5,
-    });
-    expect(parsed.maxDownloads).toBe(5);
+  it('accepts the file lifetime', () => {
+    const parsed = createUploadRequestSchema.parse({ ...valid, expiresInSeconds: 3600 });
+    expect(parsed.expiresInSeconds).toBe(3600);
+  });
+
+  it('rejects link settings rather than silently dropping them', () => {
+    // These belong to the link, which is now created separately. Accepting a
+    // password here and ignoring it would be the worst possible outcome.
+    expect(() => createUploadRequestSchema.parse({ ...valid, password: 'longenough' })).toThrow();
+    expect(() => createUploadRequestSchema.parse({ ...valid, maxDownloads: 5 })).toThrow();
   });
 
   it('rejects unknown fields rather than ignoring them', () => {
@@ -88,11 +90,41 @@ describe('uuidSchema', () => {
 });
 
 describe('createShareRequestSchema', () => {
-  it('accepts an empty body', () => {
-    expect(createShareRequestSchema.safeParse({}).success).toBe(true);
+  const fileId = '3b2e1d0c-9a8b-4c7d-8e5f-0a1b2c3d4e5f';
+  const valid = { fileIds: [fileId], manageKeys: ['a-grant'] };
+
+  it('accepts one file with its grant', () => {
+    expect(createShareRequestSchema.safeParse(valid).success).toBe(true);
   });
+
+  it('accepts several files', () => {
+    const many = Array.from({ length: 20 }, () => fileId);
+    expect(
+      createShareRequestSchema.safeParse({ fileIds: many, manageKeys: many.map(() => 'g') })
+        .success,
+    ).toBe(true);
+  });
+
+  it('requires at least one file', () => {
+    expect(createShareRequestSchema.safeParse({ fileIds: [], manageKeys: [] }).success).toBe(false);
+  });
+
+  it('caps how many files one link may serve', () => {
+    const tooMany = Array.from({ length: 21 }, () => fileId);
+    expect(
+      createShareRequestSchema.safeParse({ fileIds: tooMany, manageKeys: tooMany.map(() => 'g') })
+        .success,
+    ).toBe(false);
+  });
+
+  it('rejects a file id that is not a uuid', () => {
+    expect(
+      createShareRequestSchema.safeParse({ fileIds: ['not-a-uuid'], manageKeys: ['g'] }).success,
+    ).toBe(false);
+  });
+
   it('rejects unknown fields', () => {
-    expect(createShareRequestSchema.safeParse({ fileId: 'x' }).success).toBe(false);
+    expect(createShareRequestSchema.safeParse({ ...valid, fileId: 'x' }).success).toBe(false);
   });
 });
 

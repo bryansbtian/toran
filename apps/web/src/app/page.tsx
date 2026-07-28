@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { getConfig } from '@toran/config';
 import { branding } from '@toran/shared';
 import { UploadPanel } from '@/components/UploadPanel';

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { z } from 'zod';
 
 /** `"true" | "1" | "yes"` -> true. Anything else falsy. Empty string uses the default. */

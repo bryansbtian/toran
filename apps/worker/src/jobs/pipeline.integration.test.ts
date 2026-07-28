@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { loadConfig, type ToranConfig } from '@toran/config';
@@ -14,6 +14,7 @@ import {
   reserveDownload,
 } from '@toran/database';
 import {
+  allowIntegrationSkip,
   createTestDatabase,
   isDatabaseReachable,
   type TestDatabase,
@@ -28,12 +29,8 @@ import type { JobContext } from './types.js';
 import type { ScanVerdict, Scanner } from '../scanning/clamav.js';
 import { JobRunner } from '../runner.js';
 
-const reachable = await isDatabaseReachable();
+const reachable = allowIntegrationSkip(await isDatabaseReachable(), 'worker integration tests');
 const suite = reachable ? describe : describe.skip;
-
-if (!reachable) {
-  console.warn('[toran] Skipping worker integration tests: DATABASE_URL is unreachable.');
-}
 
 /** Scripted scanner so tests can drive every verdict deterministically. */
 class ScriptedScanner implements Scanner {
@@ -93,7 +90,7 @@ async function seedScanningFile(contents = 'harmless bytes') {
 
   const token = generateShareToken();
   const share = await createShareLink(test$.db, {
-    fileId: file.id,
+    fileIds: [file.id],
     tokenHash: hashShareToken(token),
     passwordHash: null,
     expiresAt: file.expiresAt,
@@ -137,6 +134,7 @@ suite('malware scanning pipeline', () => {
 
     const reservation = await reserveDownload(test$.db, {
       shareLinkId: share.id,
+      fileId: file.id,
       now: new Date(),
     });
     expect(reservation.kind).toBe('reserved');
@@ -166,6 +164,7 @@ suite('malware scanning pipeline', () => {
     // And the link is no longer usable.
     const reservation = await reserveDownload(test$.db, {
       shareLinkId: share.id,
+      fileId: file.id,
       now: new Date(),
     });
     expect(reservation.kind).toBe('unavailable');

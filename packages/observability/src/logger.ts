@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { pino, type Logger as PinoLogger } from 'pino';
 import { redact } from './redaction.js';
 

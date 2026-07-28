@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';

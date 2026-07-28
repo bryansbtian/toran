@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-License-Identifier: MIT -->
 
 # Troubleshooting
 
@@ -19,7 +19,7 @@ ask for it and grep the logs.
 
 ### "Toran configuration is invalid"
 
-The message names every offending variable — and never prints its value.
+The message names every offending variable - and never prints its value.
 
 ```text
 Toran configuration is invalid:
@@ -28,17 +28,17 @@ Toran configuration is invalid:
 ```
 
 In production Toran refuses: example credentials, `http://` origins, insecure
-cookies, disabled scanning, and the in-memory rate limiter. That is deliberate.
-Fix the values rather than looking for a way around it.
+cookies, disabled scanning, and the in-memory rate limiter. That is deliberate,
+and there is no flag that downgrades it to a warning. Fix the values.
 
-`TORAN_ALLOW_INSECURE_PRODUCTION=true` downgrades these to warnings. Do not use
-it on anything real.
+The message lists every problem it found, so one restart tells you everything
+that needs changing.
 
 ### The `.env` file is not being read
 
 Toran walks up from the working directory looking for `.env`, so workspace
 scripts find the repository-root file. Environment variables that are already
-set always win — a container's real environment is never shadowed.
+set always win - a container's real environment is never shadowed.
 
 If a value is not taking effect, check whether it is set in the shell or in
 `docker-compose.yml`.
@@ -82,14 +82,14 @@ origin, so the signature stays valid.
 The signature is invalid or expired. Upload URLs live for
 `TORAN_UPLOAD_URL_TTL_SECONDS` (default 15 minutes). Request a new session.
 
-Also check the system clock on the server — SigV4 rejects requests with a
+Also check the system clock on the server - SigV4 rejects requests with a
 skewed timestamp.
 
 ### Storage returns 400
 
 The body did not match what was authorised. The presigned `PUT` pins
 `Content-Type` and `Content-Length`; the browser must send them exactly. Toran's
-own client handles this — a 400 usually means a custom client is not.
+own client handles this - a 400 usually means a custom client is not.
 
 ### "UPLOAD_SIZE_MISMATCH"
 
@@ -130,18 +130,22 @@ docker logs -f toran-clamav
 docker compose ps clamav      # is it healthy?
 ```
 
-**The worker is not running.** This is the one people miss — the web app looks
-perfectly healthy while nothing ever becomes downloadable.
+**The worker is not running.** The web app looks perfectly healthy while nothing
+ever becomes downloadable, because it is the worker that scans uploads.
 
 ```bash
 docker compose ps worker
 docker compose logs --tail=50 worker
 ```
 
-In development the worker is a separate process:
+In development `npm run dev` starts the worker alongside the web app, and its
+logs are interleaved with everything else - look for `worker started` and, per
+upload, `scan clean; file is ready`. If neither appears, check that you are
+running `npm run dev` and not `next dev` or the web workspace on its own. To run
+just the worker against a stack that is already up:
 
 ```bash
-npm run build && npm run start --workspace=@toran/worker
+npm run dev --workspace=@toran/worker
 ```
 
 **The worker cannot reach ClamAV.** Look for `scanner error` in the worker log.
@@ -149,7 +153,7 @@ Check `CLAMAV_HOST` and `CLAMAV_PORT`. Jobs retry with backoff; nothing is lost.
 
 ### "This link isn't available"
 
-Deliberately uniform — it covers expired, revoked, exhausted, blocked, deleted
+Deliberately uniform - it covers expired, revoked, exhausted, blocked, deleted
 and never-existed, so the page cannot be used to probe for valid tokens. To find
 out which it actually was:
 
@@ -165,7 +169,7 @@ Toran sets the filename with `ResponseContentDisposition` on the presigned
 
 ### "That password is not correct" for a correct password
 
-Check whether you are rate limited — `TORAN_RATE_LIMIT_PASSWORD` applies per
+Check whether you are rate limited - `TORAN_RATE_LIMIT_PASSWORD` applies per
 link **and** per client, and a `429` carries `Retry-After`.
 
 Note that a link with no password and a link that does not exist both return
@@ -236,13 +240,36 @@ git add packages/database/drizzle
 
 ### `npm run dev:setup` fails
 
-**Docker not running** — start Docker Desktop or your daemon.
+**Docker not running** - start Docker Desktop or your daemon.
 
-**Ports in use** — 5432, 9000, 9001 and 3310 must be free.
+**Ports in use** - 5432, 9000, 9001 and 3310 must be free.
 `docker compose -f docker-compose.dev.yml down` then retry.
 
-**ClamAV never goes healthy** — it needs roughly 1.5 GB of RAM. On Docker
+**ClamAV never goes healthy** - it needs roughly 1.5 GB of RAM. On Docker
 Desktop, raise the VM memory limit.
+
+### A share link does not open on another device
+
+**Both devices must be on the same local network.** A guest or isolated WiFi
+network usually blocks client-to-client traffic entirely.
+
+**Ports 3000 and 9000 must both be reachable.** The page loading while the
+download fails is the signature of 3000 being open and 9000 being blocked:
+downloads redirect the browser straight to object storage. On Windows, allow both
+through the Firewall for Private networks.
+
+**The link must carry the LAN address, not `localhost`.** Generate links from the
+address `npm run dev` printed. Links made under an address you have since lost on
+reconnect will not work; re-run `npm run dev`.
+
+**`npm run dev` must have found a LAN address.** With none available it says so
+and falls back to a localhost-only instance, which nothing else on the network
+can reach. Name the address by hand if detection picked the wrong adapter:
+`npm run dev -- --address 192.168.1.42`.
+
+**`npm run dev:setup` has to have run once**, otherwise the bucket and schema do
+not exist. `npm run dev` stops with that message rather than starting a server
+that cannot work.
 
 ### Tests fail with "DATABASE_URL is unreachable"
 

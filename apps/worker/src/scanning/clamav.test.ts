@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { createServer, type Server } from 'node:net';
 import { Readable } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -42,6 +42,20 @@ describe('interpretReply', () => {
     expect(interpretReply('').kind).toBe('error');
     expect(interpretReply('   ').kind).toBe('error');
     expect(interpretReply('something unexpected').kind).toBe('error');
+  });
+
+  // A permissive "ends in OK" match would turn any of these into a clean
+  // verdict for a file nobody scanned.
+  it('does not read an unexpected line that merely ends in OK as clean', () => {
+    for (const reply of [
+      'OK',
+      'PONG OK',
+      'some proxy banner OK',
+      'stream: Win.Test.EICAR_HDB-1 FOUND OK',
+      'UNKNOWN COMMAND OK',
+    ]) {
+      expect(interpretReply(reply).kind, reply).toBe('error');
+    }
   });
 });
 
@@ -134,6 +148,27 @@ describe('ClamAvScanner', () => {
     const verdict = await scanner(portOf(server), 100).scanStream(oversized, 50);
     expect(verdict.kind).toBe('error');
     if (verdict.kind === 'error') expect(verdict.retryable).toBe(false);
+  });
+
+  it('fails closed when the object stream ends before the declared size', async () => {
+    // clamd would happily answer "stream: OK" for the prefix it received.
+    server = await fakeClamd('stream: OK');
+    const truncated = Readable.from([Buffer.alloc(10, 1)]);
+    const verdict = await scanner(portOf(server)).scanStream(truncated, 4096);
+
+    expect(verdict.kind).toBe('error');
+    if (verdict.kind === 'error') {
+      expect(verdict.retryable).toBe(true);
+      expect(verdict.detail).toContain('10 of 4096');
+    }
+  });
+
+  it('fails closed when the object stream carries more than the declared size', async () => {
+    server = await fakeClamd('stream: OK');
+    const longer = Readable.from([Buffer.alloc(64, 1)]);
+    const verdict = await scanner(portOf(server)).scanStream(longer, 32);
+
+    expect(verdict.kind).toBe('error');
   });
 
   it('streams a payload larger than one chunk', async () => {

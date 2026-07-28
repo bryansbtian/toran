@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import { backoffDelaySeconds, type JobType } from '@toran/shared';
 import type { Database } from '../client.js';

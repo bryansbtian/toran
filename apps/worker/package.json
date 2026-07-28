@@ -2,7 +2,7 @@
   "name": "@toran/worker",
   "version": "0.1.0",
   "private": true,
-  "license": "AGPL-3.0-only",
+  "license": "MIT",
   "type": "module",
   "main": "./dist/main.js",
   "bin": {
@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "dev": "node scripts/dev.mjs",
     "start": "node --enable-source-maps dist/main.js",
     "admin": "node --enable-source-maps dist/cli/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",

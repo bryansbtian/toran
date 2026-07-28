@@ -1,10 +1,11 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import 'server-only';
 import {
   ToranError,
   type DownloadResponse,
   type ErrorCode,
   type PublicShare,
+  type PublicShareFile,
   type ShareUnavailableReason,
 } from '@toran/shared';
 import {
@@ -19,11 +20,13 @@ import {
 import { StorageError } from '@toran/storage';
 import {
   evaluateShare,
+  evaluateShareFile,
   findShareByTokenHash,
   recordDownloadEvent,
   releaseDownloadReservation,
   reserveDownload,
-  type ShareWithFile,
+  type ShareFile,
+  type ShareWithFiles,
 } from '@toran/database';
 import { enforceRateLimit, type RequestContext } from '@/server/http';
 
@@ -46,7 +49,7 @@ const REASON_TO_CODE: Record<ShareUnavailableReason, ErrorCode> = {
 export async function lookupShare(
   context: RequestContext,
   token: string,
-): Promise<ShareWithFile | null> {
+): Promise<ShareWithFiles | null> {
   return findShareByTokenHash(context.db, hashShareToken(token));
 }
 
@@ -65,7 +68,7 @@ export interface PublicShareView extends PublicShare {
  */
 export function toPublicView(
   context: RequestContext,
-  found: ShareWithFile | null,
+  found: ShareWithFiles | null,
   authorized: boolean,
 ): PublicShareView {
   const now = context.clock.now();
@@ -73,35 +76,55 @@ export function toPublicView(
 
   if (!found || (!evaluation.ok && evaluation.reason !== 'scanning')) {
     return {
-      filename: '',
-      size: 0,
       status: 'unavailable',
       passwordProtected: false,
       authorized: false,
       expiresAt: null,
-      remainingDownloads: null,
+      files: [],
       shareLinkId: null,
     };
   }
 
-  const { share, file } = found;
+  const { share } = found;
   const scanning = !evaluation.ok && evaluation.reason === 'scanning';
 
   return {
-    filename: file.normalizedFilename,
-    size: file.actualSize ?? file.declaredSize,
     status: scanning ? 'scanning' : 'ready',
     passwordProtected: share.passwordHash !== null,
     authorized: share.passwordHash === null || authorized,
     expiresAt: share.expiresAt?.toISOString() ?? null,
-    remainingDownloads:
-      share.maxDownloads === null ? null : Math.max(0, share.maxDownloads - share.downloadCount),
+    // Every file is listed, each with its own state, so one file still being
+    // scanned does not hide the ones that are ready.
+    files: found.files.map((entry) => toPublicFile(share, entry, now)),
     shareLinkId: share.id,
   };
 }
 
+function toPublicFile(
+  share: ShareWithFiles['share'],
+  entry: ShareFile,
+  now: Date,
+): PublicShareFile {
+  const evaluation = evaluateShareFile(share, entry, now);
+  const status = evaluation.ok
+    ? 'ready'
+    : evaluation.reason === 'scanning'
+      ? 'scanning'
+      : 'unavailable';
+  const { maxDownloads, downloadCount } = entry.entry;
+  return {
+    fileId: entry.file.id,
+    // A file that cannot be served names itself but reveals nothing more than
+    // the link already does by existing.
+    filename: entry.file.normalizedFilename,
+    size: entry.file.actualSize ?? entry.file.declaredSize,
+    status,
+    remainingDownloads: maxDownloads === null ? null : Math.max(0, maxDownloads - downloadCount),
+  };
+}
+
 /** Detailed reason, for the endpoints that are allowed to report one. */
-export function unavailabilityError(found: ShareWithFile | null, now: Date): ToranError | null {
+export function unavailabilityError(found: ShareWithFiles | null, now: Date): ToranError | null {
   const evaluation = evaluateShare(found, now);
   if (evaluation.ok) return null;
   return new ToranError(REASON_TO_CODE[evaluation.reason]);
@@ -211,7 +234,12 @@ export async function authorizeShare(
  */
 export async function issueDownload(
   context: RequestContext,
-  input: { readonly token: string; readonly grantCookie: string | null },
+  input: {
+    readonly token: string;
+    readonly grantCookie: string | null;
+    /** Omitted by a single-file link, where there is nothing to choose. */
+    readonly fileId?: string;
+  },
 ): Promise<DownloadResponse> {
   await enforceRateLimit(context, {
     scope: 'download',
@@ -228,8 +256,15 @@ export async function issueDownload(
     throw new ToranError('PASSWORD_REQUIRED');
   }
 
+  const target = selectFile(found, input.fileId);
+  // Report the file's own reason rather than the link's: with several files the
+  // link can be perfectly usable while this one is scanning or exhausted.
+  const fileEvaluation = evaluateShareFile(found.share, target, now);
+  if (!fileEvaluation.ok) throw new ToranError(REASON_TO_CODE[fileEvaluation.reason]);
+
   const reservation = await reserveDownload(context.db, {
     shareLinkId: found.share.id,
+    fileId: target.file.id,
     now,
   });
 
@@ -240,17 +275,17 @@ export async function issueDownload(
   let url: string;
   try {
     url = await context.storage.createDownloadUrl({
-      key: found.file.storageKey,
+      key: target.file.storageKey,
       expiresInSeconds: context.config.storage.downloadUrlTtlSeconds,
-      downloadFilename: found.file.normalizedFilename,
+      downloadFilename: target.file.normalizedFilename,
       // The stored type was already neutralised at upload time; re-applying the
       // stored value keeps storage from sniffing something more permissive.
-      contentType: found.file.contentType,
+      contentType: target.file.contentType,
     });
   } catch (error) {
-    await releaseDownloadReservation(context.db, found.share.id).catch(() => {});
+    await releaseDownloadReservation(context.db, found.share.id, target.file.id).catch(() => {});
     context.log.error(
-      { shareLinkId: found.share.id, fileId: found.file.id, err: error },
+      { shareLinkId: found.share.id, fileId: target.file.id, err: error },
       'failed to sign download url; reservation released',
     );
     throw new ToranError(
@@ -274,7 +309,7 @@ export async function issueDownload(
   context.log.info(
     {
       shareLinkId: found.share.id,
-      fileId: found.file.id,
+      fileId: target.file.id,
       remainingDownloads: reservation.remaining,
     },
     'download authorised',
@@ -286,7 +321,27 @@ export async function issueDownload(
     expiresAt: new Date(
       now.getTime() + context.config.storage.downloadUrlTtlSeconds * 1000,
     ).toISOString(),
-    filename: found.file.normalizedFilename,
+    fileId: target.file.id,
+    filename: target.file.normalizedFilename,
     remainingDownloads: reservation.remaining,
   };
+}
+
+/**
+ * Resolves which file a download request meant.
+ *
+ * An unknown id is reported as `NOT_FOUND` rather than as a bad request: the
+ * answer to "is this file id behind this link" is not something a visitor
+ * holding only the token is entitled to probe for.
+ */
+function selectFile(found: ShareWithFiles, fileId: string | undefined): ShareFile {
+  if (fileId === undefined) {
+    const [only] = found.files;
+    // Naming no file is unambiguous only when the link serves exactly one.
+    if (found.files.length !== 1 || !only) throw new ToranError('VALIDATION_FAILED');
+    return only;
+  }
+  const match = found.files.find((entry) => entry.file.id === fileId);
+  if (!match) throw new ToranError('NOT_FOUND');
+  return match;
 }

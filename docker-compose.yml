@@ -1,9 +1,13 @@
-# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-License-Identifier: MIT
 #
 # Production self-hosting stack for Toran.
 #
-#   cp .env.example .env      # then EDIT IT - Toran refuses to start otherwise
+#   Create .env from .env.example, EDIT IT - Toran refuses to start with the
+#   example values - and then:
+#
 #   docker compose up -d
+#
+# See docs/DEPLOYMENT.md for what to set.
 #
 # What this gives you:
 #   toran-web      the application (the only service that needs a public port)
@@ -38,6 +42,11 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       minio: { condition: service_healthy }
+      # The web tier must not serve requests against an unmigrated schema. On a
+      # first `docker compose up` the database is healthy well before the
+      # migration container has finished, so without this the app would answer
+      # traffic with "relation does not exist" until migrate caught up.
+      migrate: { condition: service_completed_successfully }
     environment:
       NODE_ENV: production
       PORT: '3000'
@@ -230,7 +239,7 @@ services:
     container_name: toran-clamav
     environment:
       # freshclam keeps signatures current. Stale signatures are worse than
-      # useless: they give false confidence. See docs/SECURITY-MODEL.md.
+      # useless: they give false confidence. See docs/THREAT_MODEL.md.
       FRESHCLAM_CHECKS: '2'
     volumes:
       - clamav-data:/var/lib/clamav

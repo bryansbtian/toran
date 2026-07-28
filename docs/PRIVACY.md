@@ -1,9 +1,9 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-License-Identifier: MIT -->
 
 # Privacy in Toran
 
 This describes what the **software** stores and why. If you operate a Toran
-instance you also need your own privacy policy — this document is input to that,
+instance you also need your own privacy policy - this document is input to that,
 not a substitute for it.
 
 ## What Toran stores
@@ -22,8 +22,12 @@ not a substitute for it.
 
 ### About links
 
-Token **hash** only (SHA-256), password **hash** only (Argon2id), expiry,
-download limit, download count, revocation time.
+Token **hash** only (SHA-256), password **hash** only (Argon2id), expiry and
+revocation time.
+
+A link records which files it serves and in what order. Each of those rows
+carries that file's own download limit and the count spent against it, because
+the budget is per file rather than per link.
 
 Toran cannot recover a raw token or a password from its database.
 
@@ -68,7 +72,7 @@ Rotation means **quotas reset daily**, and a user who changes network gets a
 fresh allowance. Toran accepts weaker abuse control in exchange for not
 maintaining a durable record of who uploaded what.
 
-If your deployment needs stronger attribution — a corporate instance, say —
+If your deployment needs stronger attribution (a corporate instance, say),
 raise `DEFAULT_ROTATION_SECONDS` in `packages/security/src/identity.ts` and
 document the change in your privacy policy. Do not do it silently.
 
@@ -76,7 +80,7 @@ document the change in your privacy policy. Do not do it silently.
 
 Toran does not use canvas fingerprinting, font enumeration, WebGL probing,
 audio fingerprinting, behavioural analysis, or any third-party analytics. There
-are no third-party requests of any kind — the CSP forbids them.
+are no third-party requests of any kind - the CSP forbids them.
 
 ## Retention
 
@@ -115,7 +119,7 @@ A typical line:
 }
 ```
 
-Database ids appear; the token does not. **Set a log retention period** — logs
+Database ids appear; the token does not. **Set a log retention period** - logs
 are personal data in most jurisdictions.
 
 ## What the operator can see
@@ -148,7 +152,7 @@ toran-admin delete-file <file-id>
 ```
 
 Download events and abuse reports are keyed by rotating identifiers, so they
-cannot be linked back to an individual — which also means they cannot be
+cannot be linked back to an individual - which also means they cannot be
 selectively deleted on request. Note that in your policy.
 
 ### GDPR notes

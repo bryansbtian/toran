@@ -2,7 +2,7 @@
   "name": "@toran/database",
   "version": "0.1.0",
   "private": true,
-  "license": "AGPL-3.0-only",
+  "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -40,7 +40,7 @@
     "@toran/config": "*",
     "@toran/security": "*",
     "@toran/shared": "*",
-    "drizzle-orm": "^0.38.4",
+    "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.5"
   },
   "devDependencies": {

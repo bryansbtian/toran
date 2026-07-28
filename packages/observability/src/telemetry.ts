@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { SpanStatusCode, trace, type Span, type Tracer } from '@opentelemetry/api';
 
 /**

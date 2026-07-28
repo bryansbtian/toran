@@ -1,21 +1,19 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ToranError } from '@toran/shared';
 import { hashShareToken } from '@toran/security';
 import { findShareByTokenHash, listSharesForFile, revokeShareLink } from '@toran/database';
-import { beginUpload, cancelUpload, finishUpload } from '@/server/uploads';
+import { beginUpload, cancelUpload, createShare, finishUpload } from '@/server/uploads';
 import { authorizeShare, issueDownload, lookupShare, toPublicView } from '@/server/downloads';
-import { createHarness, isDatabaseReachable, type TestHarness } from './harness';
+import {
+  allowIntegrationSkip,
+  createHarness,
+  isDatabaseReachable,
+  type TestHarness,
+} from './harness';
 
-const reachable = await isDatabaseReachable();
+const reachable = allowIntegrationSkip(await isDatabaseReachable(), 'web integration tests');
 const suite = reachable ? describe : describe.skip;
-
-if (!reachable) {
-  console.warn(
-    '[toran] Skipping web integration tests: DATABASE_URL is unreachable.\n' +
-      '        Start the development stack with `npm run dev:setup`.',
-  );
-}
 
 let harness: TestHarness;
 
@@ -33,13 +31,13 @@ async function uploadFile(
   const contents = options.contents ?? 'toran integration payload';
   const context = harness.context();
 
+  // Password and download limit belong to the link, not the upload, so they are
+  // applied by `createShare` below.
   const session = await beginUpload(context, {
     filename: options.filename ?? 'report.pdf',
     size: contents.length,
     contentType: options.contentType ?? 'application/pdf',
     ...(options.expiresInSeconds ? { expiresInSeconds: options.expiresInSeconds } : {}),
-    ...(options.password ? { password: options.password } : {}),
-    ...(options.maxDownloads ? { maxDownloads: options.maxDownloads } : {}),
   });
 
   // Stand in for the browser's direct PUT to object storage.
@@ -51,7 +49,24 @@ async function uploadFile(
     checksum: null,
   });
 
-  return { session, completed, contents, storageKey };
+  // Minting the link is its own step: one link may serve several files, so it
+  // cannot exist until every upload in the batch has finished. This fixture
+  // covers the whole flow, so it returns the link alongside the file.
+  const created = await createShare(context, {
+    fileIds: [completed.file.fileId],
+    manageKeys: [completed.manageKey],
+    ...(options.expiresInSeconds ? { expiresInSeconds: options.expiresInSeconds } : {}),
+    ...(options.password ? { password: options.password } : {}),
+    ...(options.maxDownloads ? { maxDownloads: options.maxDownloads } : {}),
+  });
+
+  return {
+    session,
+    completed: { ...completed, share: created.share },
+    share: created.share,
+    contents,
+    storageKey,
+  };
 }
 
 suite('upload service', () => {
@@ -195,7 +210,7 @@ suite('upload service', () => {
     expect(found!.share.tokenHash).not.toBe(token);
   });
 
-  it('is idempotent: a replayed completion returns the same link', async () => {
+  it('is idempotent: a replayed completion returns the same file', async () => {
     const context = harness.context();
     const { session, completed } = await uploadFile();
 
@@ -205,12 +220,80 @@ suite('upload service', () => {
     });
 
     expect(replay.created).toBe(false);
-    expect(replay.share.shareId).toBe(completed.share.shareId);
-    // The token is never re-issued: only the first response can carry it.
-    expect(replay.share.token).toBeUndefined();
+    expect(replay.file.fileId).toBe(completed.file.fileId);
 
+    // Replaying a completion must not mint a second link: creating one is a
+    // separate call, and this one was never made twice.
     const shares = await listSharesForFile(harness.database.db, completed.file.fileId);
     expect(shares).toHaveLength(1);
+  });
+
+  it('refuses to put a file behind a link without a manage grant for it', async () => {
+    const context = harness.context();
+    const { completed } = await uploadFile();
+
+    await expect(
+      createShare(context, {
+        fileIds: [completed.file.fileId],
+        manageKeys: ['not-a-real-grant'],
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('serves several files from one link, each with its own budget', async () => {
+    const context = harness.context();
+    const first = await uploadFile({ filename: 'one.txt', contents: 'first payload' });
+    const second = await uploadFile({ filename: 'two.txt', contents: 'second payload' });
+
+    const created = await createShare(context, {
+      fileIds: [first.completed.file.fileId, second.completed.file.fileId],
+      manageKeys: [first.completed.manageKey, second.completed.manageKey],
+      maxDownloads: 1,
+    });
+
+    expect(created.share.files).toHaveLength(2);
+    expect(created.share.files.map((file) => file.filename)).toEqual(['one.txt', 'two.txt']);
+
+    const token = created.share.token!;
+
+    // Spending the first file's only download must leave the second untouched.
+    const one = await issueDownload(context, {
+      token,
+      grantCookie: null,
+      fileId: created.share.files[0]!.fileId,
+    });
+    expect(one.filename).toBe('one.txt');
+    expect(one.remainingDownloads).toBe(0);
+
+    await expect(
+      issueDownload(context, {
+        token,
+        grantCookie: null,
+        fileId: created.share.files[0]!.fileId,
+      }),
+    ).rejects.toMatchObject({ code: 'LINK_EXHAUSTED' });
+
+    const two = await issueDownload(context, {
+      token,
+      grantCookie: null,
+      fileId: created.share.files[1]!.fileId,
+    });
+    expect(two.filename).toBe('two.txt');
+    expect(two.remainingDownloads).toBe(0);
+  });
+
+  it('refuses a file id that is not behind the link', async () => {
+    const context = harness.context();
+    const { share } = await uploadFile();
+    const other = await uploadFile({ filename: 'elsewhere.txt' });
+
+    await expect(
+      issueDownload(context, {
+        token: share.token!,
+        grantCookie: null,
+        fileId: other.completed.file.fileId,
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
   it('applies the password and download limit requested at upload time', async () => {
@@ -447,12 +530,13 @@ suite('public share view', () => {
     const context = harness.context();
     const found = await lookupShare(context, completed.share.token!);
 
-    expect(toPublicView(context, found, false)).toMatchObject({
-      filename: 'visible.pdf',
+    const view = toPublicView(context, found, false);
+    expect(view).toMatchObject({
       status: 'ready',
       passwordProtected: false,
       authorized: true,
     });
+    expect(view.files).toMatchObject([{ filename: 'visible.pdf', status: 'ready' }]);
   });
 
   it('hides the filename of a password-protected link until authorised', async () => {

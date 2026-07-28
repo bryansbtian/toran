@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { defineConfig, devices } from '@playwright/test';
 
 const baseURL = process.env.TORAN_E2E_BASE_URL ?? 'http://localhost:3000';
@@ -35,8 +35,15 @@ export default defineConfig({
   webServer: process.env.TORAN_E2E_NO_SERVER
     ? undefined
     : {
-        command: 'npm run dev',
-        url: `${baseURL}/api/health`,
+        // `dev:local`, not `dev`. `npm run dev` is the LAN helper: it rewrites
+        // `.env` and recreates the MinIO container with a different allowed
+        // upload origin. A test run must not reconfigure the environment it is
+        // testing. CI sets TORAN_E2E_NO_SERVER and starts the processes itself.
+        command: 'npm run dev:local',
+        // `/api/ready`, not `/api/health`: health is pure process liveness and
+        // answers 200 before the database and bucket are usable, which would
+        // start the suite against an app that cannot serve a single upload.
+        url: `${baseURL}/api/ready`,
         reuseExistingServer: !process.env.CI,
         timeout: 180_000,
         stdout: 'pipe',

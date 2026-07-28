@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import 'server-only';
 import type { z } from 'zod';
 import { ToranError, isToranError, type ApiErrorBody, type ErrorCode } from '@toran/shared';
@@ -180,25 +180,65 @@ export async function readJson<T extends z.ZodTypeAny>(
   return result.data;
 }
 
+/** The scheme of an absolute url, without the trailing colon. */
+function schemeOf(url: string): string | null {
+  try {
+    return new URL(url).protocol.slice(0, -1);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The origin the browser actually addressed, or null when it cannot be read.
+ *
+ * `request.url` cannot answer this. Next rebuilds it from the server's own
+ * listen address, so it reads `http://localhost:3000` however the browser
+ * reached us - which made the old fallback here dead code and locked the app to
+ * exactly `TORAN_APP_URL`. The Host header is the value the browser sent, and
+ * script running on an attacker's page can set neither it nor Origin, which is
+ * what makes comparing the two a sound CSRF check.
+ *
+ * Proxy headers are consulted only when the deployment declares its proxies,
+ * matching how the client address is resolved in `createRequestContext`.
+ */
+function addressedOrigin(request: Request, context: RequestContext): string | null {
+  const behindProxy = context.config.app.trustedProxies.length > 0;
+  // A chain of proxies appends to these, and the first entry is the client's.
+  const forwarded = (name: string): string | null =>
+    behindProxy ? (request.headers.get(name)?.split(',')[0]?.trim() ?? null) : null;
+
+  const host = forwarded('x-forwarded-host') ?? request.headers.get('host');
+  if (host === null || host === '') return null;
+
+  const scheme = forwarded('x-forwarded-proto') ?? schemeOf(request.url);
+  if (scheme !== 'http' && scheme !== 'https') return null;
+
+  try {
+    // Round-tripping through URL normalises the default port away, so the value
+    // is comparable to the Origin header the browser sends.
+    return new URL(`${scheme}://${host}`).origin;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Rejects cross-origin state-changing requests.
  *
  * Toran's mutating endpoints are same-origin `fetch` calls from its own UI, so
- * requiring a matching Origin (or none, for non-browser clients that cannot
- * forge one from a victim's browser) is a complete CSRF defence and does not
- * need a token round-trip. Cookie-authenticated download authorisation is
- * additionally bound to the share id.
+ * requiring that Origin match the host being addressed (or that it be absent,
+ * for non-browser clients that cannot forge one from a victim's browser) is a
+ * complete CSRF defence and does not need a token round-trip. Cookie-
+ * authenticated download authorisation is additionally bound to the share id.
  */
 export function assertSameOrigin(request: Request, context: RequestContext): void {
   const origin = request.headers.get('origin');
   if (origin === null) return;
 
   const allowed = new Set<string>([context.config.app.url]);
-  try {
-    allowed.add(new URL(request.url).origin);
-  } catch {
-    /* request.url is always absolute in Next, but never trust that blindly */
-  }
+  const addressed = addressedOrigin(request, context);
+  if (addressed !== null) allowed.add(addressed);
 
   if (!allowed.has(origin)) {
     throw new ToranError('FORBIDDEN_ORIGIN', {

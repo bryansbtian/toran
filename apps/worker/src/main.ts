@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { createServer } from 'node:http';
 import { pingDatabase } from '@toran/database';
 import { createWorkerRuntime } from './context.js';

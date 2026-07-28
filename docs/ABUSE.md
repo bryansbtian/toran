@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-License-Identifier: MIT -->
 
 # Handling abuse
 
@@ -8,7 +8,7 @@ operator's playbook.
 ## Reporting abusive content
 
 **If you are reporting content on someone's Toran instance**, contact that
-instance's operator — not this repository. Every instance shows an abuse
+instance's operator - not this repository. Every instance shows an abuse
 contact, and every instance has a `/report` form.
 
 Use the form at `https://<that-instance>/report` with the link, a reason
@@ -34,9 +34,12 @@ you can see attempted reports.
 # 1. Identify what was reported. This never echoes the token back.
 toran-admin link "https://toran.example.com/s/<token>"
 
-#    -> share link id, file id, status, filename, download count
+#    -> share link id, password/expiry/revocation state, and every file the
+#       link serves: file id, downloads spent against its own budget, status
+#       and filename. A report names a link, which may carry several files.
 
-# 2. Look at the file record, including the scan verdict and every link to it.
+# 2. Look at one file's record, including the scan verdict and every link that
+#    serves it - which may include links carrying other people's files too.
 toran-admin file <file-id>
 ```
 
@@ -46,11 +49,17 @@ flagged it.
 
 ### Acting
 
+A link may serve several files, so the two commands differ in more than
+severity: one acts on a link and everything behind it, the other on a file and
+every link that carries it.
+
 ```bash
-# Revoke a single link, leaving the file intact.
+# Revoke one link. Every file behind that link stops being reachable through
+# it; the files themselves, and any other link serving them, are untouched.
 toran-admin revoke-link <share-id>
 
-# Block the file: revokes every link, quarantines or deletes the object.
+# Block the file: revokes EVERY link that serves it - including links that also
+# serve other, clean files - and quarantines or deletes the object.
 toran-admin block-file <file-id>
 
 # Delete permanently: removes the record and the object.
@@ -67,14 +76,20 @@ Destructive commands prompt for confirmation. Pass `--yes` for automation.
 
 ### Blocking versus deleting
 
-|                    | `block-file`                                           | `delete-file` |
-| ------------------ | ------------------------------------------------------ | ------------- |
-| Links              | Revoked                                                | Revoked       |
-| Object             | Quarantined or deleted per `TORAN_BLOCKED_FILE_ACTION` | Deleted       |
-| Database record    | Retained, marked `blocked`                             | Removed       |
-| Evidence preserved | Yes, if quarantining                                   | No            |
+|                    | `block-file`                                           | `delete-file`                          |
+| ------------------ | ------------------------------------------------------ | -------------------------------------- |
+| Links              | Every link serving the file is revoked                 | Every link serving the file is revoked |
+| Sibling files      | Unreachable, because their links are revoked too       | Unreachable, for the same reason       |
+| Object             | Quarantined or deleted per `TORAN_BLOCKED_FILE_ACTION` | Deleted                                |
+| Database record    | Retained, marked `blocked`                             | Removed, along with its link entries   |
+| Evidence preserved | Yes, if quarantining                                   | No                                     |
 
-**Prefer `block-file` when you may need the evidence** — for a law-enforcement
+Both are deliberately blunt about siblings: a batch that carried abusive
+content is not one the uploader gets to keep distributing the rest of. If you
+need a clean file to stay available, ask its uploader for a fresh link rather
+than reaching for a narrower command - there is not one.
+
+**Prefer `block-file` when you may need the evidence** - for a law-enforcement
 request, or a copyright dispute where you might need to show what was there.
 Quarantined objects move to the `quarantine/` prefix, which no share link can
 ever address.
@@ -88,7 +103,7 @@ your jurisdiction and the category of content, you may have reporting
 obligations and there may be material you are not permitted to retain.
 
 1. Block the file immediately (`block-file`).
-2. Preserve the record — do not `delete-file` yet.
+2. Preserve the record - do not `delete-file` yet.
 3. Follow your jurisdiction's reporting requirements.
 4. Take legal advice before deciding on retention or deletion.
 5. Document what you did and when.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 
 /**
  * Injectable clock. Every expiry decision in Toran takes one of these so tests

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-License-Identifier: MIT
 # syntax=docker/dockerfile:1.7
 
 # Multi-stage build for the Toran web application.

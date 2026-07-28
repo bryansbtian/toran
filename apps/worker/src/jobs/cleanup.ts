@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { z } from 'zod';
 import {
   cleanupStaleUploads,
@@ -10,6 +10,7 @@ import {
   findStalledScans,
   listLiveStorageKeys,
   markFileStatus,
+  deleteOrphanedShareLinks,
   pruneDownloadEvents,
   pruneFinishedJobs,
   pruneRateLimitWindows,
@@ -162,7 +163,14 @@ export const pruneDownloadEventsJob: JobHandler<typeof emptyPayload> = {
       limit: context.config.worker.cleanupBatchSize,
     });
     const windows = await pruneRateLimitWindows(context.db, now);
-    return { summary: { events, finishedJobs, rateLimitWindows: windows } };
+    // Links whose files have all been deleted. Unservable already, but their
+    // download events live and die with them.
+    const orphanedLinks = await deleteOrphanedShareLinks(context.db, {
+      limit: context.config.worker.cleanupBatchSize,
+    });
+    return {
+      summary: { events, finishedJobs, rateLimitWindows: windows, orphanedLinks },
+    };
   },
 };
 

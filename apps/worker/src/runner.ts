@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { randomBytes } from 'node:crypto';
 import { claimJobs, completeJob, failJob, reclaimExpiredLocks, type JobRow } from '@toran/database';
 import { metrics, withSpan } from '@toran/observability';

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import type { JSX } from 'react';
 import { branding } from '@toran/shared';
 
@@ -11,7 +11,7 @@ export interface LogoProps {
 /**
  * Toran's mark: an open gateway ("toran" is a ceremonial gateway/arch), drawn
  * entirely from primitives. No third-party or licensed artwork is used, so
- * forks may modify it freely under AGPL-3.0-only.
+ * forks may modify it freely under the MIT License.
  */
 export function Logo({ size = 28, className, title }: LogoProps): JSX.Element {
   const label = title ?? `${branding.name} logo`;

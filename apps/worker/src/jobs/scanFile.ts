@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { z } from 'zod';
 import { applyScanResult, enqueueJob, findFileById, revokeAllSharesForFile } from '@toran/database';
 import { quarantineKeyFor } from '@toran/storage';

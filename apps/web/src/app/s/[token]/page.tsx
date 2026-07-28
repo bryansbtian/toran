@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import type { Metadata } from 'next';
 import { DownloadPanel } from '@/components/DownloadPanel';
 
@@ -13,9 +13,17 @@ export const metadata: Metadata = {
 /**
  * The share page renders no server-side detail about the link.
  *
- * All metadata is fetched client-side from `/api/shares/{token}`, which keeps
- * the raw token out of any server-rendered HTML, out of the Next.js RSC payload
- * cache, and out of server logs that record rendered routes.
+ * Filename, size, expiry and password state are all fetched client-side from
+ * `/api/shares/{token}`, so none of it reaches the initial HTML and none of it
+ * is rendered for a visitor who turns out not to be entitled to it.
+ *
+ * The token itself is a different matter: this is a dynamic route, so Next.js
+ * puts the request's URL into the RSC payload embedded in the HTML regardless
+ * of what this component does with `params`. That is acceptable because the
+ * response is `Cache-Control: no-store` (see `middleware.ts`) and is only ever
+ * sent to a client that already supplied the token - but it is not the same as
+ * the token being absent. docs/THREAT_MODEL.md section 4 records the gap and
+ * the fragment-based fix.
  */
 export default async function SharePage({
   params,

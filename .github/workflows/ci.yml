@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-License-Identifier: MIT
 name: CI
 
 on:
@@ -22,9 +22,21 @@ env:
 
 jobs:
   # Fast feedback: formatting, linting, types and unit tests need no services.
+  #
+  # This is the only job that runs on all three platforms. Contributors develop
+  # on Windows, macOS and Linux, and every other job here is Docker-bound and so
+  # stays on Ubuntu; without this matrix nothing would catch a script or path
+  # that only works on one of them.
   static:
-    name: Format, lint, types, unit tests
-    runs-on: ubuntu-latest
+    name: Format, lint, types, unit tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +45,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           # Keys the cache on package-lock.json, so a poisoned cache cannot
-          # survive a dependency change.
+          # survive a dependency change. setup-node resolves the npm cache
+          # directory per platform, so the matrix needs no path overrides.
           cache: npm
 
       - name: Install dependencies
@@ -51,7 +64,11 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      # `next build` is slow and the images are built on Linux anyway, so one
+      # run is enough. The other runners still compile every workspace package,
+      # because lint, typecheck and test all depend on `^build` in turbo.json.
       - name: Build
+        if: matrix.os == 'ubuntu-latest'
         run: npm run build
 
   # Migrations must apply to an empty database and be idempotent.
@@ -130,6 +147,10 @@ jobs:
       # Integration tests use in-memory storage and a scripted scanner; no
       # external service is required beyond PostgreSQL.
       TORAN_SCANNING_ENABLED: 'false'
+      # PostgreSQL is provisioned above, so "unreachable" here means something
+      # is broken, not absent. Without this the suites skip themselves and the
+      # job reports green having asserted nothing.
+      TORAN_REQUIRE_INTEGRATION: 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -161,23 +182,39 @@ jobs:
           cp .env.example .env
           docker compose -f docker-compose.dev.yml up -d
 
+      # A loop that merely runs out of iterations is not a check: it let the job
+      # continue against a database that never came up, and the real failure
+      # then surfaced as an unrelated Playwright timeout minutes later. Each
+      # wait below either observes `healthy` or fails the job with that
+      # container's logs attached.
       - name: Wait for infrastructure
         run: |
-          for service in toran-dev-postgres toran-dev-minio; do
-            echo "waiting for $service"
-            for _ in $(seq 1 60); do
-              status=$(docker inspect --format '{{.State.Health.Status}}' "$service" 2>/dev/null || echo starting)
-              [ "$status" = "healthy" ] && break
-              sleep 2
+          set -euo pipefail
+
+          await_healthy() {
+            container="$1"; attempts="$2"; interval="$3"
+            echo "waiting for $container (up to $((attempts * interval))s)"
+            for _ in $(seq 1 "$attempts"); do
+              status=$(docker inspect --format '{{.State.Health.Status}}' "$container" 2>/dev/null | tr -d '\r\n' || true)
+              status=${status:-missing}
+              if [ "$status" = "healthy" ]; then
+                echo "$container is healthy"
+                return 0
+              fi
+              sleep "$interval"
             done
-          done
-          # ClamAV downloads its signature database on first boot.
-          echo "waiting for clamav"
-          for _ in $(seq 1 180); do
-            status=$(docker inspect --format '{{.State.Health.Status}}' toran-dev-clamav 2>/dev/null || echo starting)
-            [ "$status" = "healthy" ] && break
-            sleep 5
-          done
+            echo "::error::$container never became healthy (last status: ${status:-unknown})"
+            docker ps -a --filter "name=$container" --format '{{.Names}} {{.Status}}'
+            docker logs --tail 200 "$container" || true
+            return 1
+          }
+
+          await_healthy toran-dev-postgres 60 2
+          await_healthy toran-dev-minio 60 2
+          # ClamAV downloads its signature database on first boot, so it gets a
+          # much longer budget - but it still has to arrive.
+          await_healthy toran-dev-clamav 180 5
+
           docker ps --filter name=toran-dev --format '{{.Names}} {{.Status}}'
 
       - name: Create the bucket
@@ -193,20 +230,58 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: apps/web
 
-      - name: Start the worker
+      # Started here rather than by Playwright's `webServer`, which would run
+      # `npm run dev` - the LAN helper. That rewrites `.env` and recreates the
+      # MinIO container with a different allowed upload origin, so a test run
+      # would reconfigure the environment underneath itself.
+      - name: Start the web app and the worker
         run: |
+          npm run dev --workspace=@toran/web > /tmp/toran-web.log 2>&1 &
+          echo $! > /tmp/web.pid
           npm run start --workspace=@toran/worker > /tmp/toran-worker.log 2>&1 &
           echo $! > /tmp/worker.pid
-          sleep 5
+
+      # Both processes expose a real readiness endpoint, so there is no reason
+      # to guess at a startup delay. `/api/ready` and `/ready` both touch their
+      # dependencies; the liveness endpoints would answer before the database
+      # and the bucket were usable.
+      - name: Wait for the web app and the worker to be ready
+        run: |
+          set -euo pipefail
+
+          await_ready() {
+            label="$1"; url="$2"; log="$3"; attempts="$4"
+            echo "waiting for $label at $url (up to $((attempts * 2))s)"
+            for _ in $(seq 1 "$attempts"); do
+              if curl -fsS "$url" > /dev/null 2>&1; then
+                echo "$label is ready"
+                return 0
+              fi
+              sleep 2
+            done
+            echo "::error::$label never became ready at $url"
+            curl -sS -o /dev/stderr -w '\nHTTP %{http_code}\n' "$url" || true
+            tail -n 200 "$log" || true
+            return 1
+          }
+
+          await_ready "toran-web" http://127.0.0.1:3000/api/ready /tmp/toran-web.log 90
+          await_ready "toran-worker" http://127.0.0.1:3001/ready /tmp/toran-worker.log 30
 
       - name: Run Playwright tests
         run: npm run test:e2e
         env:
           CI: 'true'
+          # The servers are already up and waited on above.
+          TORAN_E2E_NO_SERVER: '1'
 
-      - name: Worker logs on failure
+      - name: Server logs on failure
         if: failure()
-        run: tail -n 200 /tmp/toran-worker.log || true
+        run: |
+          echo '--- web ---'
+          tail -n 200 /tmp/toran-web.log || true
+          echo '--- worker ---'
+          tail -n 200 /tmp/toran-worker.log || true
 
       - name: Upload Playwright report
         if: always()
@@ -216,9 +291,13 @@ jobs:
           path: apps/web/playwright-report/
           retention-days: 7
 
-      - name: Stop infrastructure
+      - name: Stop the servers and the infrastructure
         if: always()
-        run: docker compose -f docker-compose.dev.yml down -v
+        run: |
+          for pidfile in /tmp/web.pid /tmp/worker.pid; do
+            [ -f "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null || true
+          done
+          docker compose -f docker-compose.dev.yml down -v
 
   docker:
     name: Docker images
@@ -226,10 +305,13 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      # Third-party actions are pinned to a commit SHA, not a tag. A tag is
+      # mutable: whoever controls the repository can repoint it at new code,
+      # which would then run here with access to the workflow's token.
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Build the web image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@67a2d409c0a876cbe6b11854e3e25193efe4e62d # v6.12.0
         with:
           context: .
           file: apps/web/Dockerfile
@@ -240,7 +322,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=web
 
       - name: Build the worker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@67a2d409c0a876cbe6b11854e3e25193efe4e62d # v6.12.0
         with:
           context: .
           file: apps/worker/Dockerfile
@@ -261,10 +343,31 @@ jobs:
             fi
           done
 
-      - name: Scan images for known vulnerabilities
-        uses: aquasecurity/trivy-action@0.28.0
+      # Report only: a newly disclosed base-image CVE should show up in the log
+      # without blocking an unrelated pull request. `npm run audit:prod` in the
+      # supply-chain workflow is the check that does fail the build.
+      #
+      # Both shipping images are scanned. Scanning only the web image while the
+      # worker image is also published would make the log read as though
+      # everything Toran distributes had been checked. The worker is the image
+      # that matters most here: it is the only component that reads file bytes.
+      #
+      # Pinned to a commit SHA rather than a tag; the tag `0.28.0` referenced
+      # here previously does not exist upstream (they are `v`-prefixed), so the
+      # step could never resolve its action.
+      - name: Scan the web image for known vulnerabilities (report only)
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
         with:
           image-ref: toran-web:ci
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '0'
+
+      - name: Scan the worker image for known vulnerabilities (report only)
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        with:
+          image-ref: toran-worker:ci
           format: table
           severity: CRITICAL,HIGH
           ignore-unfixed: true

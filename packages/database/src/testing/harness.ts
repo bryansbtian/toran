@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { loadConfig } from '@toran/config';
 import { sql } from 'drizzle-orm';
 import { createDatabase, type DatabaseHandle } from '../client.js';
@@ -32,6 +32,36 @@ export async function isDatabaseReachable(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Decides whether an integration suite may skip itself.
+ *
+ * Skipping keeps `npm test` and a local `npm run test:integration` usable
+ * without Docker running. In CI the services are provisioned, so "unreachable"
+ * means something is broken rather than absent - and a suite that skips there
+ * reports green having asserted nothing. `TORAN_REQUIRE_INTEGRATION=true` turns
+ * the skip into a hard failure; CI sets it.
+ *
+ * Throwing at module scope fails the whole test file, which is the point: the
+ * job must not pass.
+ */
+export function allowIntegrationSkip(reachable: boolean, label: string): boolean {
+  if (reachable) return true;
+
+  const detail =
+    `${label}: DATABASE_URL is unreachable.\n` +
+    '        Start the development stack with `npm run dev:setup`.';
+
+  if (process.env.TORAN_REQUIRE_INTEGRATION === 'true') {
+    throw new Error(
+      `[toran] ${detail}\n` +
+        '        TORAN_REQUIRE_INTEGRATION=true, so this is a failure rather than a skip.',
+    );
+  }
+
+  console.warn(`[toran] Skipping ${detail}`);
+  return false;
 }
 
 export async function createTestDatabase(): Promise<TestDatabase> {

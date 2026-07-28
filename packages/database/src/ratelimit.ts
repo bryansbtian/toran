@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { eq, sql } from 'drizzle-orm';
 import type { RateLimitDecision, RateLimiter, RateLimitRule } from '@toran/security';
 import type { Database } from './client.js';

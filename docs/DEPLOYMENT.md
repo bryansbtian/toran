@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-License-Identifier: MIT -->
 
 # Deploying Toran
 
@@ -21,12 +21,16 @@ with one caveat covered below.
 ```bash
 git clone https://github.com/toran-project/toran.git
 cd toran
-cp .env.example .env
 ```
 
-Now edit `.env`. Toran **will refuse to start** if you skip this.
+Create `.env` from the template. On Linux and macOS that is
+`cp .env.example .env`; in PowerShell, `Copy-Item .env.example .env`.
 
-```bash
+Now open `.env` in an editor and set the values below. Toran **will refuse to
+start** if you skip this, and there is no flag that turns those checks into
+warnings.
+
+```dotenv
 NODE_ENV=production
 
 TORAN_APP_URL=https://toran.example.com
@@ -34,21 +38,36 @@ TORAN_DOWNLOAD_URL=https://files.example.com
 TORAN_SECURE_COOKIES=true
 TORAN_RATE_LIMIT_BACKEND=postgres
 
-# Generate a fresh value for each of these.
-#   node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
-TORAN_SECRET_KEY=<32+ random characters>
-POSTGRES_PASSWORD=<strong random password>
-MINIO_ROOT_USER=<not "toranminio">
-MINIO_ROOT_PASSWORD=<strong random password>
+TORAN_SECRET_KEY=paste-a-generated-value-here
+POSTGRES_PASSWORD=paste-a-generated-value-here
+MINIO_ROOT_USER=paste-a-generated-value-here
+MINIO_ROOT_PASSWORD=paste-a-generated-value-here
 
 TORAN_ABUSE_CONTACT_EMAIL=abuse@example.com
 
-# The web app binds to loopback; your reverse proxy fronts it.
+# The web app binds to loopback; your reverse proxy fronts it. These four are
+# read by docker-compose.yml, not by Toran.
 TORAN_BIND_ADDRESS=127.0.0.1
 TORAN_PORT=3000
 MINIO_BIND_ADDRESS=127.0.0.1
 MINIO_PORT=9000
 ```
+
+Generate each secret by running this in a terminal and copying what it prints -
+once per value, never reusing one:
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
+```
+
+Paste the output as a literal value. An `.env` file is parsed, not executed, so
+writing `TORAN_SECRET_KEY=$(node ...)` stores the text of the command rather
+than a secret, and Toran would reject it.
+
+`docker-compose.yml` builds the containers' `DATABASE_URL`, `S3_ACCESS_KEY_ID`
+and `S3_SECRET_ACCESS_KEY` from `POSTGRES_*` and `MINIO_ROOT_*`, so those are
+the values to set; you do not also edit `DATABASE_URL` for a Compose
+deployment.
 
 Then:
 
@@ -201,7 +220,7 @@ contents to clamd, so putting them in different regions is slow and expensive.
 2. Build command: `cd ../.. && npm run build --workspace=@toran/web`.
 3. Set every variable from `.env.example` in Vercel's environment settings, with
    `NODE_ENV=production`.
-4. Set `TORAN_RATE_LIMIT_BACKEND=postgres` — Vercel runs many isolated
+4. Set `TORAN_RATE_LIMIT_BACKEND=postgres` - Vercel runs many isolated
    instances, so the in-memory limiter would be meaningless. Toran refuses it in
    production anyway.
 5. Configure the storage bucket's CORS to allow `PUT` from your Vercel domain.
@@ -280,7 +299,7 @@ Work through this before letting anyone else use your instance.
 
 - [ ] `TORAN_SCANNING_ENABLED=true`.
 - [ ] ClamAV is healthy and `freshclam` is updating signatures.
-- [ ] Signature age is monitored — stale signatures are worse than none.
+- [ ] Signature age is monitored - stale signatures are worse than none.
 - [ ] `TORAN_BLOCKED_FILE_ACTION` matches your retention policy.
 - [ ] `CLAMAV_MAX_SCAN_BYTES` is at least `TORAN_MAX_FILE_SIZE_BYTES`.
 
@@ -316,7 +335,7 @@ Work through this before letting anyone else use your instance.
 
 ## Operating notes
 
-**Scaling the web tier.** Stateless — run as many replicas as you like. Requires
+**Scaling the web tier.** Stateless - run as many replicas as you like. Requires
 `TORAN_RATE_LIMIT_BACKEND=postgres`.
 
 **Scaling the worker.** Run several. `FOR UPDATE SKIP LOCKED` partitions the

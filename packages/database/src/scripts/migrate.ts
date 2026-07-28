@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { loadConfig } from '@toran/config';
 import { createDatabase } from '../client.js';
 import { runMigrations } from '../migrate.js';

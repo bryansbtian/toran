@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import type { RawEnv } from './schema.js';
 
 /**
@@ -38,9 +38,11 @@ function passwordFromDatabaseUrl(databaseUrl: string): string | null {
 }
 
 /**
- * Collects everything that makes a production deployment unsafe. Returned
- * rather than thrown so the caller can decide between failing closed (default)
- * and warning (TORAN_ALLOW_INSECURE_PRODUCTION=true).
+ * Collects everything that makes a production deployment unsafe.
+ *
+ * Returned rather than thrown so the caller can report every problem at once
+ * instead of one per restart. There is no way to downgrade these to warnings:
+ * a production instance either satisfies all of them or refuses to start.
  */
 export function collectProductionIssues(env: RawEnv): ProductionIssue[] {
   const issues: ProductionIssue[] = [];

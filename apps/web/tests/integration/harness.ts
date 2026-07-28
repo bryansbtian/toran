@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { loadConfig, type ToranConfig } from '@toran/config';
 import { createTestDatabase, type TestDatabase } from '@toran/database/testing';
 import { createNullLogger } from '@toran/observability';
@@ -82,4 +82,4 @@ export async function createHarness(
   };
 }
 
-export { isDatabaseReachable } from '@toran/database/testing';
+export { allowIntegrationSkip, isDatabaseReachable } from '@toran/database/testing';

@@ -1,16 +1,17 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 'use client';
 
 import { useCallback, useId, useMemo, useRef, useState, type DragEvent } from 'react';
-import { expiryChoices, formatBytes } from '@toran/shared';
+import { expiryChoices, formatBytes, MAX_FILES_PER_SHARE } from '@toran/shared';
 import { Alert, Button, Card, Field, inputClassName, ProgressBar } from '@toran/ui';
 import {
   ApiError,
   beginUpload,
   cancelUpload,
   completeUpload,
+  createShare,
   uploadToStorage,
-  type CompleteResponse,
+  type ShareResponse,
 } from '@/lib/api';
 import { ShareResult } from './ShareResult';
 
@@ -24,6 +25,20 @@ export interface UploadPanelProps {
 
 type Phase = 'idle' | 'uploading' | 'finalising' | 'done';
 
+/**
+ * A file the user picked, with a key of our own.
+ *
+ * Two files can share a name and a size, and `File` objects are not stable
+ * across re-renders, so removing "the third one" needs an identity React can
+ * key on that is not derived from the file itself.
+ */
+interface Selected {
+  readonly key: string;
+  readonly file: File;
+}
+
+let nextKey = 0;
+
 export function UploadPanel(props: UploadPanelProps) {
   const fileInputId = useId();
   const expiryId = useId();
@@ -34,13 +49,16 @@ export function UploadPanel(props: UploadPanelProps) {
   const abortRef = useRef<AbortController | null>(null);
   const uploadIdRef = useRef<{ uploadId: string; manageKey: string } | null>(null);
 
-  const [file, setFile] = useState<File | null>(null);
+  const [selected, setSelected] = useState<Selected[]>([]);
   const [dragging, setDragging] = useState(false);
   const [phase, setPhase] = useState<Phase>('idle');
-  const [percent, setPercent] = useState(0);
+  /** Bytes sent across the whole batch, so one bar covers every file. */
+  const [sentBytes, setSentBytes] = useState(0);
+  const [activeName, setActiveName] = useState<string | null>(null);
+  const [doneCount, setDoneCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
-  const [result, setResult] = useState<CompleteResponse | null>(null);
+  const [result, setResult] = useState<ShareResponse | null>(null);
 
   const [expiry, setExpiry] = useState(String(props.defaultExpirySeconds));
   const [usePassword, setUsePassword] = useState(false);
@@ -49,46 +67,70 @@ export function UploadPanel(props: UploadPanelProps) {
   const [downloadLimit, setDownloadLimit] = useState('1');
 
   const choices = useMemo(() => expiryChoices(props.maxExpirySeconds), [props.maxExpirySeconds]);
+  const totalBytes = useMemo(
+    () => selected.reduce((sum, entry) => sum + entry.file.size, 0),
+    [selected],
+  );
 
-  const selectFile = useCallback(
-    (next: File | null) => {
+  const addFiles = useCallback(
+    (incoming: FileList | null) => {
       setError(null);
       setFileError(null);
-      if (!next) {
-        setFile(null);
-        return;
+      const list = Array.from(incoming ?? []);
+      if (list.length === 0) return;
+
+      const accepted: Selected[] = [];
+      const rejected: string[] = [];
+      for (const file of list) {
+        if (file.size === 0) {
+          rejected.push(`${file.name} is empty`);
+          continue;
+        }
+        if (file.size > props.maxFileSizeBytes) {
+          rejected.push(`${file.name} is ${formatBytes(file.size)}`);
+          continue;
+        }
+        accepted.push({ key: `f${(nextKey += 1)}`, file });
       }
-      if (next.size === 0) {
-        setFile(null);
-        setFileError('That file is empty. Choose a file with content.');
-        return;
-      }
-      if (next.size > props.maxFileSizeBytes) {
-        setFile(null);
+
+      setSelected((current) => {
+        const room = MAX_FILES_PER_SHARE - current.length;
+        if (accepted.length > room) {
+          rejected.push(`only ${MAX_FILES_PER_SHARE} files fit on one link`);
+        }
+        return [...current, ...accepted.slice(0, Math.max(0, room))];
+      });
+
+      if (rejected.length > 0) {
         setFileError(
-          `That file is ${formatBytes(next.size)}. This server accepts up to ${formatBytes(
+          `Skipped: ${rejected.join(', ')}. This server accepts files up to ${formatBytes(
             props.maxFileSizeBytes,
           )}.`,
         );
-        return;
       }
-      setFile(next);
     },
     [props.maxFileSizeBytes],
   );
 
+  const removeFile = (key: string) => {
+    setFileError(null);
+    setSelected((current) => current.filter((entry) => entry.key !== key));
+  };
+
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setDragging(false);
-    selectFile(event.dataTransfer.files?.[0] ?? null);
+    addFiles(event.dataTransfer.files);
   };
 
   const reset = () => {
     abortRef.current = null;
     uploadIdRef.current = null;
-    setFile(null);
+    setSelected([]);
     setPhase('idle');
-    setPercent(0);
+    setSentBytes(0);
+    setActiveName(null);
+    setDoneCount(0);
     setError(null);
     setFileError(null);
     setResult(null);
@@ -104,16 +146,20 @@ export function UploadPanel(props: UploadPanelProps) {
     const pending = uploadIdRef.current;
     if (pending) {
       // Best effort: the stale-upload cleanup job reclaims the object even if
-      // this call never lands.
+      // this call never lands. Files earlier in the batch that already finished
+      // are left to their own expiry - no link was ever minted over them, so
+      // nothing can reach them in the meantime.
       await cancelUpload(pending.uploadId, pending.manageKey).catch(() => {});
     }
     uploadIdRef.current = null;
     setPhase('idle');
-    setPercent(0);
+    setSentBytes(0);
+    setActiveName(null);
+    setDoneCount(0);
   };
 
   const submit = async () => {
-    if (!file || phase === 'uploading' || phase === 'finalising') return;
+    if (selected.length === 0 || phase === 'uploading' || phase === 'finalising') return;
 
     if (usePassword && password.length < 8) {
       setError('Passwords must be at least 8 characters.');
@@ -132,34 +178,65 @@ export function UploadPanel(props: UploadPanelProps) {
 
     setError(null);
     setPhase('uploading');
-    setPercent(0);
+    setSentBytes(0);
+    setDoneCount(0);
 
     const controller = new AbortController();
     abortRef.current = controller;
 
     try {
-      const session = await beginUpload({
-        filename: file.name,
-        size: file.size,
-        contentType: file.type || 'application/octet-stream',
+      const fileIds: string[] = [];
+      const manageKeys: string[] = [];
+      let completedBytes = 0;
+
+      // Sequential rather than parallel: the per-client upload quota and the
+      // rate limiter both count requests, and a browser uploading twenty files
+      // at once mostly succeeds in starving itself.
+      for (const entry of selected) {
+        setActiveName(entry.file.name);
+
+        const session = await beginUpload({
+          filename: entry.file.name,
+          size: entry.file.size,
+          contentType: entry.file.type || 'application/octet-stream',
+          // The file's own lifetime, set here because the link may not outlive
+          // its content: `createShare` clamps the link to the earliest file
+          // expiry, so a file given the default would cap the link at it.
+          expiresInSeconds: Number(expiry),
+        });
+        uploadIdRef.current = { uploadId: session.uploadId, manageKey: session.manageKey };
+
+        await uploadToStorage({
+          url: session.upload.url,
+          headers: session.upload.headers,
+          file: entry.file,
+          signal: controller.signal,
+          onProgress: (progress) => setSentBytes(completedBytes + progress.loaded),
+        });
+
+        const completed = await completeUpload(session.uploadId);
+        uploadIdRef.current = null;
+        completedBytes += entry.file.size;
+        setSentBytes(completedBytes);
+        setDoneCount((count) => count + 1);
+
+        fileIds.push(completed.file.fileId);
+        manageKeys.push(completed.manageKey);
+      }
+
+      // Every file is stored and verified, so the link can finally be minted
+      // over all of them at once.
+      setPhase('finalising');
+      setActiveName(null);
+      const share = await createShare({
+        fileIds,
+        manageKeys,
         expiresInSeconds: Number(expiry),
         ...(usePassword ? { password } : {}),
         ...(useDownloadLimit ? { maxDownloads: limit } : {}),
       });
-      uploadIdRef.current = { uploadId: session.uploadId, manageKey: session.manageKey };
 
-      await uploadToStorage({
-        url: session.upload.url,
-        headers: session.upload.headers,
-        file,
-        signal: controller.signal,
-        onProgress: (progress) => setPercent(progress.percent),
-      });
-
-      setPhase('finalising');
-      const completed = await completeUpload(session.uploadId);
-      uploadIdRef.current = null;
-      setResult(completed);
+      setResult(share);
       setPhase('done');
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === 'AbortError') {
@@ -167,7 +244,8 @@ export function UploadPanel(props: UploadPanelProps) {
         return;
       }
       setPhase('idle');
-      setPercent(0);
+      setSentBytes(0);
+      setActiveName(null);
       setError(
         caught instanceof ApiError ? caught.message : 'The upload failed. Please try again.',
       );
@@ -185,12 +263,17 @@ export function UploadPanel(props: UploadPanelProps) {
   }
 
   const busy = phase === 'uploading' || phase === 'finalising';
+  const percent = phase === 'finalising' || totalBytes === 0 ? 100 : (sentBytes / totalBytes) * 100;
+  const many = selected.length > 1;
 
   return (
     <Card>
-      <h1 className="text-2xl font-semibold tracking-tight text-ink">Share a file</h1>
+      <h1 className="text-2xl font-semibold tracking-tight text-ink">
+        {many ? 'Share files' : 'Share a file'}
+      </h1>
       <p className="mt-2 text-sm text-ink-muted">
-        Your file goes straight from this browser to storage. Toran only ever handles the link.
+        Your {many ? 'files go' : 'file goes'} straight from this browser to storage. Toran only
+        ever handles the link.
       </p>
 
       <div className="mt-6 space-y-6">
@@ -207,23 +290,28 @@ export function UploadPanel(props: UploadPanelProps) {
               dragging ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface-sunken',
             ].join(' ')}
           >
-            <p className="text-sm text-ink-muted">Drag a file here, or</p>
+            <p className="text-sm text-ink-muted">Drag files here, or</p>
             <label
               htmlFor={fileInputId}
               className="mt-3 inline-flex cursor-pointer items-center rounded-lg border border-line bg-surface-raised px-4 py-2.5 text-sm font-medium text-ink hover:bg-surface focus-within:ring-2 focus-within:ring-brand-500"
             >
-              Choose a file
+              {selected.length > 0 ? 'Add more files' : 'Choose files'}
               <input
                 ref={inputRef}
                 id={fileInputId}
                 type="file"
+                multiple
                 className="sr-only"
                 disabled={busy}
-                onChange={(event) => selectFile(event.target.files?.[0] ?? null)}
+                onChange={(event) => {
+                  addFiles(event.target.files);
+                  // Cleared so picking the same file twice still fires change.
+                  event.target.value = '';
+                }}
               />
             </label>
             <p className="mt-3 text-xs text-ink-subtle">
-              Up to {formatBytes(props.maxFileSizeBytes)}
+              Up to {formatBytes(props.maxFileSizeBytes)} each, {MAX_FILES_PER_SHARE} files per link
             </p>
           </div>
           {fileError ? (
@@ -233,16 +321,37 @@ export function UploadPanel(props: UploadPanelProps) {
           ) : null}
         </div>
 
-        {file ? (
-          <div
-            className="rounded-lg border border-line bg-surface-sunken px-4 py-3"
-            data-testid="selected-file"
-          >
-            <p className="truncate text-sm font-medium text-ink" title={file.name}>
-              {file.name}
-            </p>
-            <p className="text-xs text-ink-muted">{formatBytes(file.size)}</p>
-          </div>
+        {selected.length > 0 ? (
+          <ul className="space-y-2" data-testid="selected-file">
+            {selected.map((entry) => (
+              <li
+                key={entry.key}
+                className="flex items-center gap-3 rounded-lg border border-line bg-surface-sunken px-4 py-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-ink" title={entry.file.name}>
+                    {entry.file.name}
+                  </p>
+                  <p className="text-xs text-ink-muted">{formatBytes(entry.file.size)}</p>
+                </div>
+                {!busy ? (
+                  <button
+                    type="button"
+                    onClick={() => removeFile(entry.key)}
+                    className="shrink-0 rounded px-2 py-1 text-xs font-medium text-ink-muted hover:text-ink focus-visible:ring-2 focus-visible:ring-brand-500"
+                  >
+                    Remove
+                    <span className="sr-only"> {entry.file.name}</span>
+                  </button>
+                ) : null}
+              </li>
+            ))}
+            {many ? (
+              <li className="px-1 text-xs text-ink-subtle">
+                {selected.length} files · {formatBytes(totalBytes)} total · one link
+              </li>
+            ) : null}
+          </ul>
         ) : null}
 
         <fieldset className="space-y-4" disabled={busy}>
@@ -306,7 +415,11 @@ export function UploadPanel(props: UploadPanelProps) {
               <Field
                 label="Maximum downloads"
                 htmlFor={downloadsId}
-                hint={`Between 1 and ${props.maxDownloadLimit}.`}
+                hint={
+                  many
+                    ? `Between 1 and ${props.maxDownloadLimit}, counted separately for each file.`
+                    : `Between 1 and ${props.maxDownloadLimit}.`
+                }
               >
                 <input
                   id={downloadsId}
@@ -325,11 +438,14 @@ export function UploadPanel(props: UploadPanelProps) {
 
         {busy ? (
           <div className="space-y-2" data-testid="upload-progress">
-            <ProgressBar value={phase === 'finalising' ? 100 : percent} label="Upload progress" />
+            <ProgressBar value={percent} label="Upload progress" />
             <p className="text-xs text-ink-muted" aria-live="polite">
               {phase === 'finalising'
-                ? 'Verifying the stored file…'
-                : `Uploading… ${Math.round(percent)}%`}
+                ? 'Creating the link…'
+                : many
+                  ? `Uploading ${Math.min(doneCount + 1, selected.length)} of ${selected.length}` +
+                    `${activeName === null ? '' : ` — ${activeName}`} … ${Math.round(percent)}%`
+                  : `Uploading… ${Math.round(percent)}%`}
             </p>
           </div>
         ) : null}
@@ -337,7 +453,7 @@ export function UploadPanel(props: UploadPanelProps) {
         {error ? <Alert title="Upload failed">{error}</Alert> : null}
 
         <div className="flex flex-wrap gap-3">
-          <Button onClick={submit} disabled={!file || busy} loading={busy}>
+          <Button onClick={submit} disabled={selected.length === 0 || busy} loading={busy}>
             {busy ? 'Uploading' : 'Create share link'}
           </Button>
           {busy ? (

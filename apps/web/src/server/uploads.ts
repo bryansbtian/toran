@@ -1,6 +1,7 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import 'server-only';
 import {
+  MAX_FILES_PER_SHARE,
   ToranError,
   normalizeFilename,
   resolveExpiry,
@@ -8,9 +9,16 @@ import {
   type CreateUploadRequest,
   type CreateUploadResponse,
   type FileSummary,
+  type ShareFile,
   type ShareSummary,
 } from '@toran/shared';
-import { generateShareToken, hashShareToken, hashPassword, issueGrant } from '@toran/security';
+import {
+  generateShareToken,
+  hashShareToken,
+  hashPassword,
+  issueGrant,
+  verifyGrant,
+} from '@toran/security';
 import { generateStorageKey } from '@toran/storage';
 import { StorageError } from '@toran/storage';
 import {
@@ -20,8 +28,8 @@ import {
   createShareLink,
   createUpload,
   enqueueJob,
+  findFileById,
   findUploadSession,
-  listSharesForFile,
   type FileRow,
   type ShareLinkRow,
 } from '@toran/database';
@@ -72,12 +80,6 @@ export async function beginUpload(
     });
   }
 
-  if (input.maxDownloads !== undefined && input.maxDownloads > config.limits.maxDownloadLimit) {
-    throw new ToranError('DOWNLOAD_LIMIT_OUT_OF_RANGE', {
-      message: `The download limit must be ${config.limits.maxDownloadLimit} or fewer.`,
-    });
-  }
-
   await enforceAnonymousQuota(context, input.size);
 
   // Content type is decided by the server, not the client: active formats are
@@ -85,10 +87,6 @@ export async function beginUpload(
   const contentType = safeContentType(input.contentType, filename.normalized);
   const storageKey = generateStorageKey();
   const now = clock.now();
-
-  // Hashed here, at the edge, so the plaintext password exists only for the
-  // lifetime of this request and is never written anywhere.
-  const sharePasswordHash = input.password ? await hashPassword(input.password) : null;
 
   const { file, session } = await createUpload(context.db, {
     storageKey,
@@ -100,9 +98,12 @@ export async function beginUpload(
     anonIdentifier: context.clientId,
     ownerId: null,
     sessionExpiresAt: new Date(now.getTime() + config.worker.uploadSessionTtlSeconds * 1000),
-    sharePasswordHash,
-    shareMaxDownloads: input.maxDownloads ?? null,
-    shareExpiresAt: expiry.expiresAt,
+    // Link settings no longer ride along with the upload: the link is created
+    // separately, over the whole batch, by `createShare`. The columns remain
+    // for rows written before that split.
+    sharePasswordHash: null,
+    shareMaxDownloads: null,
+    shareExpiresAt: null,
   });
 
   let upload;
@@ -167,19 +168,18 @@ async function enforceAnonymousQuota(context: RequestContext, declaredSize: numb
 
 export interface FinishUploadResult {
   readonly file: FileSummary;
-  readonly share: ShareSummary;
   readonly manageKey: string;
-  readonly shareManageKey: string;
   /** True when this request performed the transition rather than replaying it. */
   readonly created: boolean;
 }
 
 /**
- * Confirms an upload, verifies the stored object, and creates the share link.
+ * Confirms an upload and verifies the stored object.
  *
- * Idempotent end to end. A retried request re-reads the existing share link
- * instead of creating a second one, and never enqueues a duplicate scan job
- * (the job carries a dedupe key derived from the file id).
+ * Idempotent end to end. A retried request replays the same result and never
+ * enqueues a duplicate scan job (the job carries a dedupe key derived from the
+ * file id). Creating the link is a separate step, because one link may serve
+ * several files and cannot exist until all of them have been uploaded.
  */
 export async function finishUpload(
   context: RequestContext,
@@ -254,24 +254,16 @@ export async function finishUpload(
     });
   }
 
-  const share = created
-    ? await createShareForFile(context, {
-        file,
-        now,
-        passwordHash: outcome.session.sharePasswordHash,
-        maxDownloads: outcome.session.shareMaxDownloads,
-        expiresAt: outcome.session.shareExpiresAt ?? file.expiresAt,
-      })
-    : await reuseShareForFile(context, file);
-
   context.log.info(
-    { fileId: file.id, shareLinkId: share.row.id, created, actualSize: head.size },
+    { fileId: file.id, created, actualSize: head.size },
     created ? 'upload completed' : 'upload completion replayed',
   );
 
+  // No link is minted here. A link may serve several files, so it cannot exist
+  // until every one of them has been uploaded; `createShare` is the step that
+  // names them. The manage key is what proves the caller uploaded this file.
   return {
     file: toFileSummary(file),
-    share: toShareSummary(share.row, config.app.url, share.token),
     created,
     manageKey: issueGrant({
       purpose: 'manage',
@@ -279,54 +271,152 @@ export async function finishUpload(
       secret: config.app.secretKey,
       now,
     }),
+  };
+}
+
+export interface CreateShareResult {
+  readonly share: ShareSummary;
+  readonly shareManageKey: string;
+}
+
+/**
+ * Mints one link over one or more already-uploaded files.
+ *
+ * Every file id must name a file this caller uploaded, proved by a manage
+ * grant. Without that check any client could mint a fresh link - with its own
+ * password and expiry - over a file id it merely guessed, which would let it
+ * re-share someone else's upload.
+ */
+export async function createShare(
+  context: RequestContext,
+  input: {
+    readonly fileIds: readonly string[];
+    readonly manageKeys: readonly string[];
+    readonly expiresInSeconds?: number;
+    readonly password?: string;
+    readonly maxDownloads?: number;
+  },
+): Promise<CreateShareResult> {
+  const { config, clock } = context;
+  const now = clock.now();
+
+  if (input.fileIds.length > MAX_FILES_PER_SHARE) {
+    throw new ToranError('VALIDATION_FAILED', {
+      message: `A link may serve at most ${MAX_FILES_PER_SHARE} files.`,
+    });
+  }
+  // A file listed twice would get two rows and two budgets for one object.
+  if (new Set(input.fileIds).size !== input.fileIds.length) {
+    throw new ToranError('VALIDATION_FAILED', { message: 'The same file was listed twice.' });
+  }
+
+  const rows: FileRow[] = [];
+  for (const fileId of input.fileIds) {
+    if (!ownsFile(context, fileId, input.manageKeys, now)) {
+      // Same code as a missing file: whether the id exists is not something an
+      // unauthorised caller gets to learn.
+      throw new ToranError('NOT_FOUND', { message: 'That file was not found.' });
+    }
+    const file = await findFileById(context.db, fileId);
+    if (!file || file.deletedAt !== null) {
+      throw new ToranError('NOT_FOUND', { message: 'That file was not found.' });
+    }
+    // `pending`/`uploading` mean the bytes are not verified yet; a link over
+    // them would promise something storage cannot serve.
+    if (file.status === 'pending' || file.status === 'uploading') {
+      throw new ToranError('CONFLICT', {
+        message: 'That upload has not finished yet.',
+        internal: `file ${file.id} is ${file.status}`,
+      });
+    }
+    rows.push(file);
+  }
+
+  const first = rows[0];
+  if (!first) throw new ToranError('VALIDATION_FAILED', { message: 'Select at least one file.' });
+
+  if (input.maxDownloads !== undefined && input.maxDownloads > config.limits.maxDownloadLimit) {
+    throw new ToranError('DOWNLOAD_LIMIT_OUT_OF_RANGE', {
+      message: `The download limit must be ${config.limits.maxDownloadLimit} or fewer.`,
+    });
+  }
+
+  // Falls back to the shortest file expiry. A link outliving its own content
+  // would resolve to a file the cleanup job has already removed.
+  let expiresAt = earliestExpiry(rows);
+  if (input.expiresInSeconds !== undefined) {
+    const expiry = resolveExpiry(
+      {
+        requestedSeconds: input.expiresInSeconds,
+        defaultSeconds: config.limits.defaultExpirySeconds,
+        maxSeconds: config.limits.maxExpirySeconds,
+      },
+      clock,
+    );
+    if (!expiry.ok) {
+      throw new ToranError('EXPIRY_OUT_OF_RANGE', {
+        message: `Expiration must be between 1 minute and ${Math.floor(
+          config.limits.maxExpirySeconds / 86_400,
+        )} days.`,
+      });
+    }
+    // Never past the content: the files were given their lifetime at upload.
+    expiresAt =
+      expiresAt === null
+        ? expiry.expiresAt
+        : new Date(Math.min(expiry.expiresAt.getTime(), expiresAt.getTime()));
+  }
+
+  const token = generateShareToken();
+  const row = await createShareLink(context.db, {
+    fileIds: rows.map((file) => file.id),
+    // Only the hash is ever persisted. The raw token below is returned once.
+    tokenHash: hashShareToken(token),
+    passwordHash: input.password === undefined ? null : await hashPassword(input.password),
+    expiresAt,
+    maxDownloads: input.maxDownloads ?? null,
+  });
+
+  context.log.info({ shareLinkId: row.id, fileCount: rows.length }, 'share link created');
+
+  return {
+    share: toShareSummary(row, config.app.url, token, rows, input.maxDownloads ?? null),
     shareManageKey: issueGrant({
       purpose: 'manage',
-      subject: share.row.id,
+      subject: row.id,
       secret: config.app.secretKey,
       now,
     }),
   };
 }
 
-interface ShareCreation {
-  readonly row: ShareLinkRow;
-  /** Present only when this request minted the token. */
-  readonly token: string | undefined;
-}
-
-async function createShareForFile(
+/** True when one of the supplied grants covers this file. */
+function ownsFile(
   context: RequestContext,
-  input: {
-    readonly file: FileRow;
-    readonly now: Date;
-    readonly passwordHash?: string | null;
-    readonly maxDownloads?: number | null;
-    readonly expiresAt?: Date | null;
-  },
-): Promise<ShareCreation> {
-  const token = generateShareToken();
-  const row = await createShareLink(context.db, {
-    fileId: input.file.id,
-    // Only the hash is ever persisted. The raw token below is returned once.
-    tokenHash: hashShareToken(token),
-    passwordHash: input.passwordHash ?? null,
-    expiresAt: input.expiresAt !== undefined ? input.expiresAt : input.file.expiresAt,
-    maxDownloads: input.maxDownloads ?? null,
-  });
-  return { row, token };
+  fileId: string,
+  manageKeys: readonly string[],
+  now: Date,
+): boolean {
+  return manageKeys.some(
+    (key) =>
+      verifyGrant(key, {
+        purpose: 'manage',
+        subject: fileId,
+        secret: context.config.app.secretKey,
+        now,
+      }).valid,
+  );
 }
 
-async function reuseShareForFile(context: RequestContext, file: FileRow): Promise<ShareCreation> {
-  const [row] = await listSharesForFile(context.db, file.id);
-  if (!row) {
-    // A completed upload with no link should not happen; treat as a conflict
-    // rather than silently minting a second token the caller cannot correlate.
-    throw new ToranError('CONFLICT', {
-      message: 'This upload has already been completed but has no share link.',
-      internal: `file ${file.id} completed without a share link`,
-    });
+function earliestExpiry(rows: readonly FileRow[]): Date | null {
+  let earliest: Date | null = null;
+  for (const file of rows) {
+    if (file.expiresAt === null) continue;
+    if (earliest === null || file.expiresAt.getTime() < earliest.getTime()) {
+      earliest = file.expiresAt;
+    }
   }
-  return { row, token: undefined };
+  return earliest;
 }
 
 export async function cancelUpload(context: RequestContext, uploadId: string): Promise<void> {
@@ -360,7 +450,16 @@ export function toShareSummary(
   row: ShareLinkRow,
   appUrl: string,
   token: string | undefined,
+  files: readonly FileRow[],
+  maxDownloads: number | null,
 ): ShareSummary {
+  const [first, ...rest] = files.map((file): ShareFile => ({
+    ...toFileSummary(file),
+    // Freshly created, so nothing has been spent yet.
+    remainingDownloads: maxDownloads,
+  }));
+  if (!first) throw new Error('a share link always has at least one file');
+
   return {
     shareId: row.id,
     // Without the raw token the URL cannot be reconstructed, which is exactly
@@ -369,14 +468,12 @@ export function toShareSummary(
     ...(token ? { token } : {}),
     expiresAt: row.expiresAt?.toISOString() ?? null,
     maxDownloads: row.maxDownloads,
-    downloadCount: row.downloadCount,
     passwordProtected: row.passwordHash !== null,
     revokedAt: row.revokedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
+    files: [first, ...rest],
   };
 }
-
-export { createShareForFile };
 
 function storageFailure(error: unknown, internal: string): ToranError {
   const retryable = error instanceof StorageError ? error.retryable : false;

@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import { uploadFile, waitForReady } from './helpers';
+import { uploadFile, uploadFiles, waitForReady } from './helpers';
 
 test.describe('Toran share lifecycle', () => {
   test('uploads a file, shows progress, and yields a working share link', async ({
@@ -32,6 +32,74 @@ test.describe('Toran share lifecycle', () => {
       const chunks: Buffer[] = [];
       for await (const chunk of stream) chunks.push(Buffer.from(chunk));
       expect(Buffer.concat(chunks).toString()).toBe(contents);
+    } finally {
+      await visitor.close();
+    }
+  });
+
+  test('serves several files from one link and lets the visitor choose', async ({
+    page,
+    browser,
+  }) => {
+    const stamp = Date.now();
+    const entries = [
+      { name: 'alpha.txt', contents: `alpha ${stamp}` },
+      { name: 'beta.txt', contents: `beta ${stamp}` },
+      { name: 'gamma.txt', contents: `gamma ${stamp}` },
+    ];
+    const shareUrl = await uploadFiles(page, entries);
+
+    // One link, three files - not three links.
+    await expect(page.getByTestId('share-files').getByRole('listitem')).toHaveCount(3);
+
+    const visitor = await browser.newContext();
+    const visitorPage = await visitor.newPage();
+    try {
+      await waitForReady(visitorPage, shareUrl, 3);
+      await expect(visitorPage.getByRole('heading', { name: '3 files' })).toBeVisible();
+
+      // Taking only the middle one must fetch that file, not the first.
+      const download = visitorPage.waitForEvent('download', { timeout: 45_000 });
+      await visitorPage.getByRole('button', { name: 'Download beta.txt' }).click();
+      const file = await download;
+
+      expect(file.suggestedFilename()).toBe('beta.txt');
+      const stream = await file.createReadStream();
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+      expect(Buffer.concat(chunks).toString()).toBe(`beta ${stamp}`);
+
+      // The others are still offered: one download did not consume the link.
+      await expect(visitorPage.getByTestId('download')).toHaveCount(3);
+    } finally {
+      await visitor.close();
+    }
+  });
+
+  test('keeps each file’s download budget separate', async ({ page, browser }) => {
+    const shareUrl = await uploadFiles(
+      page,
+      [
+        { name: 'one.txt', contents: 'first' },
+        { name: 'two.txt', contents: 'second' },
+      ],
+      { maxDownloads: 1 },
+    );
+
+    const visitor = await browser.newContext();
+    const visitorPage = await visitor.newPage();
+    try {
+      await waitForReady(visitorPage, shareUrl, 2);
+
+      const download = visitorPage.waitForEvent('download', { timeout: 45_000 });
+      await visitorPage.getByRole('button', { name: 'Download one.txt' }).click();
+      await download;
+
+      // one.txt is spent, but two.txt still has its own untouched budget.
+      await expect(visitorPage.getByRole('button', { name: 'Download two.txt' })).toBeVisible({
+        timeout: 30_000,
+      });
+      await expect(visitorPage.getByRole('button', { name: 'Download one.txt' })).toHaveCount(0);
     } finally {
       await visitor.close();
     }
@@ -85,7 +153,7 @@ test.describe('Toran share lifecycle', () => {
     const firstPage = await first.newPage();
     try {
       await waitForReady(firstPage, shareUrl);
-      await expect(firstPage.getByTestId('remaining-downloads')).toHaveText('1');
+      await expect(firstPage.getByTestId('remaining-downloads')).toContainText('1 download left');
 
       const download = firstPage.waitForEvent('download', { timeout: 45_000 });
       await firstPage.getByTestId('download').click();
@@ -147,7 +215,7 @@ test.describe('Toran share lifecycle', () => {
     await page.goto('/');
     await page.locator('input[type="file"]').setInputFiles(oversizedPath);
 
-    await expect(page.getByText(/This server accepts up to/)).toBeVisible();
+    await expect(page.getByText(/This server accepts files up to/)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Create share link' })).toBeDisabled();
 
     await fs.unlink(oversizedPath).catch(() => {});
@@ -160,7 +228,7 @@ test.describe('Toran share lifecycle', () => {
       mimeType: 'text/plain',
       buffer: Buffer.alloc(0),
     });
-    await expect(page.getByText('That file is empty. Choose a file with content.')).toBeVisible();
+    await expect(page.getByText(/empty\.txt is empty/)).toBeVisible();
   });
 
   test('creating another link resets the form', async ({ page }) => {

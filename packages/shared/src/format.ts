@@ -1,10 +1,10 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
 
 /** Human-readable byte count using binary multiples with decimal labels. */
 export function formatBytes(bytes: number, fractionDigits = 1): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return '—';
+  if (!Number.isFinite(bytes) || bytes < 0) return '-';
   if (bytes < 1024) return `${Math.round(bytes)} B`;
   let value = bytes;
   let unit = 0;

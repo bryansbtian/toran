@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { loadConfig } from '@toran/config';
 import { generateShareToken, hashShareToken } from '@toran/security';
 import { generateStorageKey } from '@toran/storage';
@@ -44,7 +44,7 @@ async function main(): Promise<void> {
 
     const token = generateShareToken();
     await createShareLink(handle.db, {
-      fileId: file.id,
+      fileIds: [file.id],
       tokenHash: hashShareToken(token),
       passwordHash: null,
       expiresAt: new Date(Date.now() + 86_400_000),

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { desc, eq } from 'drizzle-orm';
 import type { ReportReason } from '@toran/shared';
 import type { Database } from '../client.js';

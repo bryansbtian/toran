@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import globals from 'globals';
@@ -86,8 +86,17 @@ export default tseslint.config(
       ...nextPlugin.configs['core-web-vitals'].rules,
     },
   },
+  // Tests and the harnesses they share. `**/testing/**` is test infrastructure,
+  // not shipped code: it reads test-runner switches such as
+  // TORAN_REQUIRE_INTEGRATION, which are deliberately not part of ToranConfig.
   {
-    files: ['**/*.test.ts', '**/*.test.tsx', '**/tests/**/*.ts', '**/e2e/**/*.ts'],
+    files: [
+      '**/*.test.ts',
+      '**/*.test.tsx',
+      '**/tests/**/*.ts',
+      '**/testing/**/*.ts',
+      '**/e2e/**/*.ts',
+    ],
     languageOptions: { globals: { ...globals.node } },
     rules: {
       'no-console': 'off',

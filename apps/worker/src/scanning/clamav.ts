@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { Socket } from 'node:net';
 import { once } from 'node:events';
 
@@ -87,6 +87,19 @@ export class ClamAvScanner implements Scanner {
             await once(socket, 'drain');
           }
         }
+      }
+
+      // A verdict is only meaningful for the whole object. A storage read that
+      // ends early without raising - a truncated response, a provider that
+      // silently short-reads - would otherwise have clamd bless a prefix and
+      // Toran promote the file to `ready`. Refusing to interpret a reply for a
+      // partial stream is what keeps that failure mode closed.
+      if (sent !== declaredSize) {
+        return {
+          kind: 'error',
+          detail: `stream ended after ${sent} of ${declaredSize} declared bytes`,
+          retryable: true,
+        };
       }
 
       // Zero-length chunk terminates the stream.
@@ -196,7 +209,11 @@ export function interpretReply(reply: string): ScanVerdict {
   if (line.length === 0) {
     return { kind: 'error', detail: 'empty reply from clamd', retryable: true };
   }
-  if (/\bOK$/.test(line)) return { kind: 'clean' };
+  // Only clamd's exact INSTREAM success line counts as clean. Matching a looser
+  // pattern (anything ending in "OK") would let an unexpected reply - a proxy
+  // banner, a future status line, a partially framed response - be read as a
+  // clean verdict, which is the one mistake a scanner must never make.
+  if (/^stream:\s*OK$/.test(line)) return { kind: 'clean' };
   if (/\bFOUND$/.test(line)) {
     const match = /^stream:\s*(.+?)\s+FOUND$/.exec(line);
     return { kind: 'infected', signature: match?.[1] ?? 'unknown' };

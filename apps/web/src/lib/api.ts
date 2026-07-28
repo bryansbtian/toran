@@ -1,6 +1,7 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import type {
   CompleteUploadResponse,
+  CreateShareResponse,
   CreateUploadRequest,
   CreateUploadResponse,
   DownloadResponse,
@@ -72,14 +73,32 @@ export function beginUpload(input: CreateUploadRequest): Promise<BeginUploadResp
 }
 
 export interface CompleteResponse extends CompleteUploadResponse {
+  /** Proves this client uploaded the file; required to put it behind a link. */
   readonly manageKey: string;
-  readonly shareManageKey: string;
 }
 
 export function completeUpload(uploadId: string): Promise<CompleteResponse> {
   return call<CompleteResponse>(`/api/uploads/${encodeURIComponent(uploadId)}/complete`, {
     method: 'POST',
     body: JSON.stringify({}),
+  });
+}
+
+export interface ShareResponse extends CreateShareResponse {
+  readonly shareManageKey: string;
+}
+
+/** Mints one link over every file of a finished batch. */
+export function createShare(input: {
+  readonly fileIds: readonly string[];
+  readonly manageKeys: readonly string[];
+  readonly expiresInSeconds?: number;
+  readonly password?: string;
+  readonly maxDownloads?: number;
+}): Promise<ShareResponse> {
+  return call<ShareResponse>('/api/shares', {
+    method: 'POST',
+    body: JSON.stringify(input),
   });
 }
 
@@ -108,10 +127,11 @@ export function authorizeShare(token: string, password: string): Promise<{ autho
   });
 }
 
-export function requestDownload(token: string): Promise<DownloadResponse> {
+/** `fileId` may be omitted only when the link serves exactly one file. */
+export function requestDownload(token: string, fileId?: string): Promise<DownloadResponse> {
   return call<DownloadResponse>(`/api/shares/${encodeURIComponent(token)}/download`, {
     method: 'POST',
-    body: JSON.stringify({}),
+    body: JSON.stringify(fileId === undefined ? {} : { fileId }),
   });
 }
 

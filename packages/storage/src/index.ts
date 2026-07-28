@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 export * from './keys.js';
 export * from './s3.js';
 export * from './types.js';

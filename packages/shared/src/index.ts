@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 export * from './branding.js';
 export * from './contracts.js';
 export * from './domain.js';

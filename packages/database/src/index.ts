@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 export * from './client.js';
 export * from './ratelimit.js';
 export * from './sql-helpers.js';
@@ -9,6 +9,7 @@ export {
   files,
   jobs,
   rateLimits,
+  shareLinkFiles,
   shareLinks,
   uploadSessions,
   users,
@@ -17,6 +18,7 @@ export {
   type FileRow,
   type JobRow,
   type NewFileRow,
+  type ShareLinkFileRow,
   type ShareLinkRow,
   type UploadSessionRow,
   type UserRow,

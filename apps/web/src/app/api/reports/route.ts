@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { createReportRequestSchema } from '@toran/shared';
 import { extractShareToken, hashShareToken } from '@toran/security';
 import { createAbuseReport, findShareByTokenHash } from '@toran/database';
@@ -43,7 +43,8 @@ export const POST = handler('POST /api/reports', async (request, context) => {
       reportId: report.id,
       reason: body.reason,
       shareLinkId: found?.share.id,
-      fileId: found?.file.id,
+      // A reported link may carry several files; all of them are in scope.
+      fileIds: found?.files.map((entry) => entry.file.id),
       resolved: found !== null,
     },
     'abuse report received',

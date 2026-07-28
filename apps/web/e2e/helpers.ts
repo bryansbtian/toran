@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { expect, type Page } from '@playwright/test';
 
 export interface UploadOptions {
@@ -20,16 +20,47 @@ export interface UploadOptions {
 export async function uploadFile(page: Page, options: UploadOptions = {}): Promise<string> {
   const filename = options.filename ?? `toran-e2e-${Date.now()}.txt`;
   const contents = options.contents ?? `toran end-to-end test payload ${Date.now()}`;
+  return uploadFiles(page, [{ name: filename, contents }], options);
+}
 
+export interface UploadEntry {
+  readonly name: string;
+  readonly contents: string;
+  readonly mimeType?: string;
+}
+
+/**
+ * Uploads one or more files and returns the single link that serves them all.
+ *
+ * Same path as `uploadFile`, which delegates here: several files behind one
+ * link is the general case, and one file is just the shape of it with a list of
+ * length one.
+ */
+export async function uploadFiles(
+  page: Page,
+  entries: readonly UploadEntry[],
+  options: UploadOptions = {},
+): Promise<string> {
   await page.goto('/');
+  // Nothing is selected yet, so the panel is always in its singular form here.
+  // The plural heading is asserted below, after the files are chosen - checking
+  // for it now would only ever find the singular one.
   await expect(page.getByRole('heading', { name: 'Share a file' })).toBeVisible();
 
-  await page.locator('input[type="file"]').setInputFiles({
-    name: filename,
-    mimeType: options.mimeType ?? 'text/plain',
-    buffer: Buffer.from(contents),
-  });
-  await expect(page.getByTestId('selected-file')).toContainText(filename);
+  await page.locator('input[type="file"]').setInputFiles(
+    entries.map((entry) => ({
+      name: entry.name,
+      mimeType: entry.mimeType ?? options.mimeType ?? 'text/plain',
+      buffer: Buffer.from(entry.contents),
+    })),
+  );
+  for (const entry of entries) {
+    await expect(page.getByTestId('selected-file')).toContainText(entry.name);
+  }
+  // Selecting several files switches the panel to its plural form.
+  if (entries.length > 1) {
+    await expect(page.getByRole('heading', { name: 'Share files' })).toBeVisible();
+  }
 
   if (options.expiryLabel) {
     await page.getByLabel('Link expires after').selectOption({ label: options.expiryLabel });
@@ -58,8 +89,16 @@ export async function uploadFile(page: Page, options: UploadOptions = {}): Promi
   return url;
 }
 
-/** Waits until a share page reports the file is downloadable. */
-export async function waitForReady(page: Page, shareUrl: string): Promise<void> {
+/**
+ * Waits until a share page offers a download for every file it should.
+ *
+ * `toHaveCount` rather than `toBeVisible`: a link may serve several files, each
+ * with its own `download` button, and a visibility assertion on that locator is
+ * a strict-mode violation the moment there is more than one. Counting also
+ * asserts the thing worth asserting - that *all* the files finished scanning,
+ * not merely that one did.
+ */
+export async function waitForReady(page: Page, shareUrl: string, expectedFiles = 1): Promise<void> {
   await page.goto(shareUrl);
-  await expect(page.getByTestId('download')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('download')).toHaveCount(expectedFiles, { timeout: 60_000 });
 }

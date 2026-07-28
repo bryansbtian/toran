@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-License-Identifier: MIT
 name: Bug report
 description: Something in Toran does not work as documented.
 labels: ['bug', 'needs-triage']

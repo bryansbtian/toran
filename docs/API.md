@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-License-Identifier: MIT -->
 
 # Toran API
 
@@ -66,9 +66,15 @@ The MVP is anonymous. Two capability mechanisms replace accounts:
 upload, list a file's links, or revoke a link. Signed and bound to one subject
 id, so a grant for one resource cannot act on another.
 
-**Download grants.** Set as an `HttpOnly`, `SameSite=Strict`, path-scoped
-cookie after a correct password. Bound to one share-link id and short-lived
-(15 minutes).
+**Download grants.** Set as an `HttpOnly`, `SameSite=Strict` cookie after a
+correct password, and short-lived (15 minutes). The cookie is `Path=/`, because
+the page that needs it and the endpoint that consumes it are under different
+prefixes; isolation between links comes from the cookie **name**, which embeds
+the share-link id, and from the grant being HMAC-bound to that same id. A grant
+for one link is rejected on every other.
+
+A link has at most one password, covering all of its files. Authorising once
+unlocks the whole link.
 
 Mutating endpoints validate the `Origin` header.
 
@@ -78,23 +84,26 @@ Mutating endpoints validate the `Origin` header.
 
 ### `POST /api/uploads`
 
-Creates an upload session and returns a presigned `PUT` URL. Rate limited by
-`TORAN_RATE_LIMIT_UPLOAD_CREATE`.
+Creates an upload session for **one** file and returns a presigned `PUT` URL.
+Call it once per file. Rate limited by `TORAN_RATE_LIMIT_UPLOAD_CREATE`.
 
 ```json
 {
   "filename": "quarterly-report.pdf",
   "size": 2481523,
   "contentType": "application/pdf",
-  "expiresInSeconds": 86400,
-  "password": "optional, min 8 chars",
-  "maxDownloads": 5
+  "expiresInSeconds": 86400
 }
 ```
 
-`filename`, `size` required; unknown fields are rejected. `expiresInSeconds`
-defaults to `TORAN_DEFAULT_EXPIRY_SECONDS` and is clamped by
-`TORAN_MAX_EXPIRY_SECONDS`.
+`filename`, `size` required; unknown fields are rejected. `expiresInSeconds` is
+**this file's** lifetime, not the link's: it defaults to
+`TORAN_DEFAULT_EXPIRY_SECONDS` and is clamped by `TORAN_MAX_EXPIRY_SECONDS`.
+
+`password` and `maxDownloads` belong to the link and are **rejected** here with
+`VALIDATION_FAILED`. Send them to [`POST /api/shares`](#post-apishares) instead.
+The schema refuses them outright rather than appearing to honour a setting this
+endpoint would ignore.
 
 **`201 Created`**
 
@@ -118,7 +127,7 @@ The browser must `PUT` to `upload.url` with those headers. `Content-Length` is
 set automatically by the browser; the others must be sent verbatim or the
 signature will not match.
 
-### `PUT <upload.url>` — direct to storage
+### `PUT <upload.url>` - direct to storage
 
 Not a Toran endpoint. The file body goes straight to object storage.
 
@@ -126,13 +135,17 @@ Not a Toran endpoint. The file body goes straight to object storage.
 | -------------- | ---------------------------------------------------- |
 | `200` / `204`  | Stored                                               |
 | `400`          | Body did not match what was authorised               |
-| `403`          | Signature invalid or expired — request a new session |
+| `403`          | Signature invalid or expired - request a new session |
 | `5xx`          | Storage problem; retry                               |
 
 ### `POST /api/uploads/{id}/complete`
 
-Verifies the stored object and creates the share link. **Idempotent** — repeat
-it freely; you get the same link back and no duplicate scan job.
+Verifies the stored object. **Idempotent** - repeat it freely; you get the same
+file back and no duplicate scan job.
+
+This does **not** create a link. A link may serve several files, so it cannot
+exist until every file of the batch has been stored; see
+[`POST /api/shares`](#post-apishares).
 
 ```json
 { "checksum": "optional lowercase sha-256 hex" }
@@ -151,24 +164,12 @@ it freely; you get the same link back and no duplicate scan job.
     "createdAt": "2026-07-26T12:00:00.000Z",
     "expiresAt": "2026-07-27T12:00:00.000Z"
   },
-  "share": {
-    "shareId": "7c6d5e4f-...",
-    "url": "https://toran.example.com/s/Xy9_Kq2mNp4RvT8wZa1BcD3e",
-    "token": "Xy9_Kq2mNp4RvT8wZa1BcD3e",
-    "expiresAt": "2026-07-27T12:00:00.000Z",
-    "maxDownloads": 5,
-    "downloadCount": 0,
-    "passwordProtected": true,
-    "revokedAt": null,
-    "createdAt": "2026-07-26T12:00:05.000Z"
-  },
-  "manageKey": "...",
-  "shareManageKey": "..."
+  "manageKey": "..."
 }
 ```
 
-> `share.token` appears **only here, only once**. Toran stores only its SHA-256
-> and cannot recover it. Losing it means losing the link.
+> Keep `manageKey`. It proves you uploaded this file, and `POST /api/shares`
+> will not put a file behind a link without it.
 
 Errors: `UPLOAD_INCOMPLETE` (object not in storage yet), `UPLOAD_SIZE_MISMATCH`,
 `GONE` (session expired), `CONFLICT` (cancelled).
@@ -185,21 +186,74 @@ Cancels an in-flight upload. Requires `X-Toran-Manage-Key`.
 
 ## Share links
 
-### `POST /api/files/{id}/shares`
+### `POST /api/shares`
 
-Creates an additional link for an existing file. Requires `X-Toran-Manage-Key`
-for that file id.
+Creates one link over one or more uploaded files, in the order given. Every file
+must be named with the `manageKey` returned when it was completed; a file id
+without a matching grant is reported as `NOT_FOUND`, so link creation cannot be
+used to probe for, or re-share, someone else's upload.
+
+At most **20 files** per link.
 
 ```json
-{ "expiresInSeconds": 3600, "password": "optional", "maxDownloads": 1 }
+{
+  "fileIds": ["3b2e1d0c-...", "9f8e7d6c-..."],
+  "manageKeys": ["...", "..."],
+  "expiresInSeconds": 3600,
+  "password": "optional",
+  "maxDownloads": 1
+}
 ```
 
-**`201 Created`** — `{ "share": { ... "token": "..." }, "shareManageKey": "..." }`
+**`201 Created`**
+
+```json
+{
+  "share": {
+    "shareId": "7c6d5e4f-...",
+    "url": "https://toran.example.com/s/Xy9_Kq2mNp4RvT8wZa1BcD3e",
+    "token": "Xy9_Kq2mNp4RvT8wZa1BcD3e",
+    "expiresAt": "2026-07-27T12:00:00.000Z",
+    "maxDownloads": 5,
+    "passwordProtected": true,
+    "revokedAt": null,
+    "createdAt": "2026-07-26T12:00:05.000Z",
+    "files": [
+      {
+        "fileId": "3b2e1d0c-...",
+        "filename": "quarterly-report.pdf",
+        "size": 2481523,
+        "status": "scanning",
+        "contentType": "application/pdf",
+        "createdAt": "2026-07-26T12:00:00.000Z",
+        "expiresAt": "2026-07-27T12:00:00.000Z",
+        "remainingDownloads": 5
+      }
+    ]
+  },
+  "shareManageKey": "..."
+}
+```
+
+> `share.token` appears **only here, only once**. Toran stores only its SHA-256
+> and cannot recover it. Losing it means losing the link.
+
+`maxDownloads` is a budget **per file**, not for the link as a whole: a limit of
+3 over four files permits three downloads of each. One recipient exhausting one
+file leaves the others untouched.
+
+The link's expiry is clamped to the earliest expiry among its files - a link
+must never outlive content the cleanup job has already removed.
+
+Errors: `NOT_FOUND` (unknown file, or no grant for it), `CONFLICT` (an upload has
+not finished), `VALIDATION_FAILED` (over 20 files, or the same file twice),
+`EXPIRY_OUT_OF_RANGE`, `DOWNLOAD_LIMIT_OUT_OF_RANGE`.
 
 ### `GET /api/files/{id}/shares`
 
-Lists a file's links. Requires `X-Toran-Manage-Key`. Raw tokens are **never**
-included — they cannot be recovered.
+Lists the links that serve a file. Requires `X-Toran-Manage-Key`. A link listed
+here may name files beyond the one asked about. Raw tokens are **never**
+included - they cannot be recovered.
 
 ### `DELETE /api/shares/{id}`
 
@@ -223,20 +277,37 @@ Public metadata. Always `200`, even for a token that does not exist.
 
 ```json
 {
-  "filename": "quarterly-report.pdf",
-  "size": 2481523,
   "status": "ready",
   "passwordProtected": true,
   "authorized": false,
   "expiresAt": "2026-07-27T12:00:00.000Z",
-  "remainingDownloads": 5
+  "files": [
+    {
+      "fileId": "3b2e1d0c-...",
+      "filename": "quarterly-report.pdf",
+      "size": 2481523,
+      "status": "ready",
+      "remainingDownloads": 5
+    },
+    {
+      "fileId": "9f8e7d6c-...",
+      "filename": "appendix.csv",
+      "size": 8122,
+      "status": "scanning",
+      "remainingDownloads": 5
+    }
+  ]
 }
 ```
 
-`status` is `ready`, `scanning`, or `unavailable`. **Missing, revoked, expired,
-exhausted, blocked and deleted links all return the identical `unavailable`
-shape** with empty filename and zero size, so this endpoint cannot be used to
-distinguish them.
+Each file carries its own `status` and its own `remainingDownloads`, so a file
+still being scanned does not hide the ones that are ready.
+
+The link's `status` is `ready` while **any** file can still be served,
+`scanning` while none can yet but some still might, and `unavailable`
+otherwise. **Missing, revoked, expired, exhausted, blocked and deleted links all
+return the identical `unavailable` shape** with an empty `files` array, so this
+endpoint cannot be used to distinguish them.
 
 ### `POST /api/shares/{token}/authorize`
 
@@ -247,15 +318,25 @@ client (`TORAN_RATE_LIMIT_PASSWORD`).
 { "password": "the link password" }
 ```
 
-**`200 OK`** — `{ "authorized": true }` plus a `Set-Cookie` with the grant.
+**`200 OK`** - `{ "authorized": true }` plus a `Set-Cookie` with the grant.
 
 **`401 INVALID_CREDENTIALS`** for a wrong password, a link with no password, or
-a link that does not exist — the three are indistinguishable, including in
+a link that does not exist - the three are indistinguishable, including in
 response time (a decoy Argon2id verification runs for the non-matching cases).
 
 ### `POST /api/shares/{token}/download`
 
-Atomically reserves a download slot and returns a presigned URL. Empty body.
+Atomically reserves a download slot for **one file** of the link and returns a
+presigned URL for it.
+
+```json
+{ "fileId": "3b2e1d0c-..." }
+```
+
+`fileId` may be omitted only when the link serves exactly one file; omitting it
+on a multi-file link is `VALIDATION_FAILED`. A file id that is not behind this
+link is `NOT_FOUND` - whether it exists elsewhere is not something a visitor
+holding only the token may probe for.
 
 **`200 OK`**
 
@@ -263,10 +344,15 @@ Atomically reserves a download slot and returns a presigned URL. Empty body.
 {
   "url": "https://files.example.com/toran/objects/...?X-Amz-Signature=...",
   "expiresAt": "2026-07-26T12:32:00.000Z",
+  "fileId": "3b2e1d0c-...",
   "filename": "quarterly-report.pdf",
   "remainingDownloads": 4
 }
 ```
+
+`remainingDownloads` counts down that file's own budget. Errors are reported for
+the file asked for, not the link: a link can be perfectly usable while this
+particular file is `FILE_SCANNING` or `LINK_EXHAUSTED`.
 
 Navigate to `url`. Storage serves it as an attachment with the original filename.
 
@@ -296,7 +382,7 @@ Rate limited by `TORAN_RATE_LIMIT_REPORT`.
 `reason` is one of `malware`, `phishing`, `copyright`, `harassment`, `illegal`,
 `other`.
 
-**`202 Accepted`** — `{ "received": true }`
+**`202 Accepted`** - `{ "received": true }`
 
 Always `202`, whether or not the link resolves, so this is not an existence
 oracle. Reporter identity is stored as a rotating hash and never shown to the
@@ -339,39 +425,62 @@ goes to the server log.
 
 ## Complete upload example
 
+`files` is an array of one or more `File` objects. Uploading each one is a
+three-step loop; the link is minted once, at the end, over all of them.
+
 ```javascript
-// 1. Ask for permission to upload.
-const session = await fetch('/api/uploads', {
+const fileIds = [];
+const manageKeys = [];
+
+for (const file of files) {
+  // 1. Ask for permission to upload this file.
+  const session = await fetch('/api/uploads', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      filename: file.name,
+      size: file.size,
+      contentType: file.type || 'application/octet-stream',
+      // The file's own lifetime. Link settings go to POST /api/shares.
+      expiresInSeconds: 86400,
+    }),
+  }).then((response) => response.json());
+
+  // 2. Upload the bytes DIRECTLY to storage. Never through Toran.
+  await new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open('PUT', session.upload.url);
+    request.setRequestHeader('Content-Type', session.upload.headers['Content-Type']);
+    request.upload.onprogress = (event) => {
+      console.log(`${file.name}: ${Math.round((event.loaded / event.total) * 100)}%`);
+    };
+    request.onload = () =>
+      request.status < 300 ? resolve() : reject(new Error(`HTTP ${request.status}`));
+    request.onerror = () => reject(new Error('network error'));
+    request.send(file);
+  });
+
+  // 3. Confirm. Safe to retry. This creates no link.
+  const completed = await fetch(`/api/uploads/${session.uploadId}/complete`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+  }).then((response) => response.json());
+
+  fileIds.push(completed.file.fileId);
+  manageKeys.push(completed.manageKey);
+}
+
+// 4. Every file is stored and verified, so the link can be minted over them.
+const { share } = await fetch('/api/shares', {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({
-    filename: file.name,
-    size: file.size,
-    contentType: file.type || 'application/octet-stream',
+    fileIds,
+    manageKeys,
     expiresInSeconds: 86400,
-    maxDownloads: 5,
+    maxDownloads: 5, // per file, not for the link as a whole
   }),
-}).then((response) => response.json());
-
-// 2. Upload the bytes DIRECTLY to storage. Never through Toran.
-await new Promise((resolve, reject) => {
-  const request = new XMLHttpRequest();
-  request.open('PUT', session.upload.url);
-  request.setRequestHeader('Content-Type', session.upload.headers['Content-Type']);
-  request.upload.onprogress = (event) => {
-    console.log(`${Math.round((event.loaded / event.total) * 100)}%`);
-  };
-  request.onload = () =>
-    request.status < 300 ? resolve() : reject(new Error(`HTTP ${request.status}`));
-  request.onerror = () => reject(new Error('network error'));
-  request.send(file);
-});
-
-// 3. Confirm. Safe to retry.
-const { share } = await fetch(`/api/uploads/${session.uploadId}/complete`, {
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: '{}',
 }).then((response) => response.json());
 
 console.log(share.url); // the only time you will see the token
@@ -384,6 +493,7 @@ const meta = await fetch(`/api/shares/${token}`).then((r) => r.json());
 if (meta.status === 'unavailable') throw new Error('link not available');
 
 if (meta.passwordProtected && !meta.authorized) {
+  // One password for the whole link; authorising unlocks every file.
   await fetch(`/api/shares/${token}/authorize`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -392,10 +502,15 @@ if (meta.passwordProtected && !meta.authorized) {
   });
 }
 
+// Each file has its own status and its own remaining downloads. Pick one that
+// is ready; `fileId` may be omitted only when the link serves exactly one file.
+const wanted = meta.files.find((file) => file.status === 'ready');
+if (!wanted) throw new Error('nothing on this link is downloadable yet');
+
 const { url } = await fetch(`/api/shares/${token}/download`, {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
-  body: '{}',
+  body: JSON.stringify({ fileId: wanted.fileId }),
   credentials: 'same-origin',
 }).then((r) => r.json());
 

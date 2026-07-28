@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { randomBytes } from 'node:crypto';
 
 export const OBJECT_PREFIX = 'objects';

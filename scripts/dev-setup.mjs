@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 
 /**
  * One-command development bootstrap.
@@ -23,8 +23,28 @@ const ok = (message) => console.log(`    ✓ ${message}`);
 const warn = (message) => console.log(`    ! ${message}`);
 const fail = (message) => console.error(`    ✗ ${message}`);
 
-/** On Windows npm is a `.cmd` shim, which `spawn` needs named explicitly. */
-const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+/**
+ * Builds an npm invocation that needs no shell.
+ *
+ * On Windows npm is a `.cmd` shim, and Node refuses to spawn one unless
+ * `shell: true` (the CVE-2024-27980 fix), which would reintroduce cmd.exe
+ * quoting. npm exports its own JS entry point in `npm_execpath`, and this Node
+ * binary can run that directly. The fallbacks cover being invoked as
+ * `node scripts/dev-setup.mjs`, where npm has set nothing.
+ */
+function npmCommand(args) {
+  const npmCli = process.env.npm_execpath;
+  if (npmCli) return [process.execPath, [npmCli, ...args]];
+  if (process.platform !== 'win32') return ['npm', args];
+  const bundled = path.join(
+    path.dirname(process.execPath),
+    'node_modules',
+    'npm',
+    'bin',
+    'npm-cli.js',
+  );
+  return [process.execPath, [bundled, ...args]];
+}
 
 /**
  * Runs a command without a shell.
@@ -101,6 +121,30 @@ async function startInfrastructure() {
   ok('containers started');
 }
 
+/** Width of the status line `progress` last drew, so `clearProgress` can erase it. */
+let progressWidth = 0;
+
+/**
+ * Draws a status line in place, over the previous one.
+ *
+ * Only on a TTY: a carriage return in a redirected log or a CI transcript is
+ * not a cursor movement, it is just another character in the file.
+ */
+function progress(message) {
+  if (!process.stdout.isTTY) return;
+  // Pad to the previous width. A bare `\r` only moves the cursor, so a shorter
+  // line would otherwise leave the tail of a longer one on screen.
+  process.stdout.write(`${message.padEnd(progressWidth)}\r`);
+  progressWidth = message.length;
+}
+
+/** Erases whatever `progress` last drew, leaving the cursor at column zero. */
+function clearProgress() {
+  if (progressWidth === 0) return;
+  process.stdout.write(`${''.padEnd(progressWidth)}\r`);
+  progressWidth = 0;
+}
+
 /** Polls `docker inspect` until the container reports healthy. */
 async function waitForHealthy(container, label, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
@@ -113,6 +157,7 @@ async function waitForHealthy(container, label, timeoutMs) {
     );
     lastStatus = result.stdout.trim() || lastStatus;
     if (lastStatus === 'healthy') {
+      clearProgress();
       ok(`${label} is healthy`);
       return true;
     }
@@ -120,10 +165,10 @@ async function waitForHealthy(container, label, timeoutMs) {
       await delay(2000);
       continue;
     }
-    process.stdout.write(`    waiting for ${label} (${lastStatus})…\r`);
+    progress(`    waiting for ${label} (${lastStatus})…`);
     await delay(2000);
   }
-  process.stdout.write('\n');
+  clearProgress();
   warn(
     `${label} did not become healthy within ${Math.round(timeoutMs / 1000)}s (last: ${lastStatus})`,
   );
@@ -172,7 +217,8 @@ async function configureBucketCors(env) {
 
 async function buildPackages() {
   step('Building workspace packages');
-  const result = await run(NPM, ['run', 'build'], {
+  const [command, args] = npmCommand(['run', 'build']);
+  const result = await run(command, args, {
     quiet: true,
     env: { ...process.env, TURBO_TELEMETRY_DISABLED: '1' },
   });
@@ -186,7 +232,8 @@ async function buildPackages() {
 
 async function runMigrations() {
   step('Applying database migrations');
-  const result = await run(NPM, ['run', 'db:migrate'], { quiet: true });
+  const [command, args] = npmCommand(['run', 'db:migrate']);
+  const result = await run(command, args, { quiet: true });
   if (result.code !== 0) {
     fail('migrations failed:');
     console.error(result.stdout || result.stderr);
@@ -229,7 +276,9 @@ async function main() {
 
   console.log('\nToran is ready. Start it with:\n');
   console.log('    npm run dev\n');
-  console.log('Then open http://localhost:3000');
+  // Deliberately not printing an address: `npm run dev` addresses the instance
+  // to this machine's LAN address and ends by printing the one to open.
+  console.log('That starts the web app and the worker, and prints the address to open.');
   console.log('MinIO console: http://localhost:9001\n');
 }
 

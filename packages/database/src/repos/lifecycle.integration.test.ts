@@ -1,10 +1,15 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { generateShareToken, hashShareToken, hashPassword } from '@toran/security';
 import { generateStorageKey } from '@toran/storage';
-import { createTestDatabase, isDatabaseReachable, type TestDatabase } from '../testing/harness.js';
-import { files, shareLinks, uploadSessions } from '../schema.js';
+import {
+  allowIntegrationSkip,
+  createTestDatabase,
+  isDatabaseReachable,
+  type TestDatabase,
+} from '../testing/harness.js';
+import { files, shareLinkFiles, uploadSessions } from '../schema.js';
 import {
   abortUploadSession,
   anonymousUsage,
@@ -17,6 +22,7 @@ import {
 import {
   createShareLink,
   evaluateShare,
+  findShareById,
   findShareByTokenHash,
   listSharesForFile,
   recordDownloadEvent,
@@ -27,20 +33,14 @@ import {
 } from './shares.js';
 import {
   cleanupStaleUploads,
+  deleteOrphanedShareLinks,
   expireFiles,
   expireShareLinks,
   pruneDownloadEvents,
 } from './maintenance.js';
 
-const reachable = await isDatabaseReachable();
+const reachable = allowIntegrationSkip(await isDatabaseReachable(), 'database integration tests');
 const suite = reachable ? describe : describe.skip;
-
-if (!reachable) {
-  console.warn(
-    '[toran] Skipping database integration tests: DATABASE_URL is unreachable.\n' +
-      '        Start the development stack with `npm run dev:setup`.',
-  );
-}
 
 let test$: TestDatabase;
 
@@ -59,6 +59,28 @@ const uploadDefaults = () => ({
   shareExpiresAt: new Date(Date.now() + 86_400_000),
 });
 
+/**
+ * The only file of a link these fixtures seeded.
+ *
+ * Budgets are per file, so reserving needs to name one. Every share here has
+ * exactly one, and resolving it from the link keeps each test reading as though
+ * it still reserves against the link itself.
+ */
+async function onlyFileOf(shareLinkId: string): Promise<string> {
+  const found = await findShareById(test$.db, shareLinkId);
+  const fileId = found?.files[0]?.file.id;
+  if (fileId === undefined) throw new Error(`share ${shareLinkId} has no files`);
+  return fileId;
+}
+
+async function reserveOnly(shareLinkId: string, now = new Date()) {
+  return reserveDownload(test$.db, { shareLinkId, fileId: await onlyFileOf(shareLinkId), now });
+}
+
+async function releaseOnly(shareLinkId: string): Promise<void> {
+  return releaseDownloadReservation(test$.db, shareLinkId, await onlyFileOf(shareLinkId));
+}
+
 /** Creates a file already in `ready` with one share link. */
 async function seedReadyShare(
   options: { maxDownloads?: number | null; password?: string; expiresAt?: Date | null } = {},
@@ -71,7 +93,7 @@ async function seedReadyShare(
 
   const token = generateShareToken();
   const share = await createShareLink(test$.db, {
-    fileId: file.id,
+    fileIds: [file.id],
     tokenHash: hashShareToken(token),
     passwordHash: options.password ? await hashPassword(options.password) : null,
     expiresAt: options.expiresAt === undefined ? file.expiresAt : options.expiresAt,
@@ -104,6 +126,7 @@ suite('database migrations', () => {
       'files',
       'upload_sessions',
       'share_links',
+      'share_link_files',
       'download_events',
       'jobs',
       'abuse_reports',
@@ -116,15 +139,17 @@ suite('database migrations', () => {
   it('enforces the non-negative download counter', async () => {
     const { share } = await seedReadyShare();
     await expect(
-      test$.handle.sql`update share_links set download_count = -1 where id = ${share.id}`,
+      test$.handle
+        .sql`update share_link_files set download_count = -1 where share_link_id = ${share.id}`,
     ).rejects.toThrow();
   });
 
   it('enforces the download limit at the database level', async () => {
     const { share } = await seedReadyShare({ maxDownloads: 2 });
     await expect(
-      test$.handle.sql`update share_links set download_count = 3 where id = ${share.id}`,
-    ).rejects.toThrow(/share_links_within_download_limit/);
+      test$.handle
+        .sql`update share_link_files set download_count = 3 where share_link_id = ${share.id}`,
+    ).rejects.toThrow(/share_link_files_within_download_limit/);
   });
 
   it('enforces uniqueness of storage keys and token hashes', async () => {
@@ -136,9 +161,7 @@ suite('database migrations', () => {
       `,
     ).rejects.toThrow();
     await expect(
-      test$.handle.sql`
-        insert into share_links (file_id, token_hash) values (${file.id}, ${share.tokenHash})
-      `,
+      test$.handle.sql`insert into share_links (token_hash) values (${share.tokenHash})`,
     ).rejects.toThrow();
   });
 });
@@ -389,7 +412,7 @@ suite('share links and downloads', () => {
   it('finds a link only by its token hash', async () => {
     const { token, file } = await seedReadyShare();
     const found = await findShareByTokenHash(test$.db, hashShareToken(token));
-    expect(found?.file.id).toBe(file.id);
+    expect(found?.files[0]?.file.id).toBe(file.id);
     expect(await findShareByTokenHash(test$.db, hashShareToken('wrong-token'))).toBeNull();
   });
 
@@ -404,17 +427,17 @@ suite('share links and downloads', () => {
 
   it('reserves a download and decrements the remaining count', async () => {
     const { share } = await seedReadyShare({ maxDownloads: 3 });
-    const result = await reserveDownload(test$.db, { shareLinkId: share.id, now: new Date() });
+    const result = await reserveOnly(share.id);
     expect(result.kind).toBe('reserved');
     if (result.kind !== 'reserved') return;
     expect(result.remaining).toBe(2);
-    expect(result.share.downloadCount).toBe(1);
+    expect(result.entry.downloadCount).toBe(1);
   });
 
   it('permits unlimited downloads when no limit is set', async () => {
     const { share } = await seedReadyShare({ maxDownloads: null });
     for (let i = 0; i < 5; i += 1) {
-      const result = await reserveDownload(test$.db, { shareLinkId: share.id, now: new Date() });
+      const result = await reserveOnly(share.id);
       expect(result.kind).toBe('reserved');
       if (result.kind === 'reserved') expect(result.remaining).toBeNull();
     }
@@ -425,9 +448,7 @@ suite('share links and downloads', () => {
     const { share } = await seedReadyShare({ maxDownloads: limit });
     const now = new Date();
 
-    const results = await Promise.all(
-      Array.from({ length: 20 }, () => reserveDownload(test$.db, { shareLinkId: share.id, now })),
-    );
+    const results = await Promise.all(Array.from({ length: 20 }, () => reserveOnly(share.id, now)));
 
     const reserved = results.filter((result) => result.kind === 'reserved');
     expect(reserved).toHaveLength(limit);
@@ -435,7 +456,10 @@ suite('share links and downloads', () => {
       20 - limit,
     );
 
-    const [row] = await test$.db.select().from(shareLinks).where(eq(shareLinks.id, share.id));
+    const [row] = await test$.db
+      .select()
+      .from(shareLinkFiles)
+      .where(eq(shareLinkFiles.shareLinkId, share.id));
     expect(row?.downloadCount).toBe(limit);
   });
 
@@ -443,8 +467,8 @@ suite('share links and downloads', () => {
     const { share } = await seedReadyShare({ maxDownloads: 1 });
     const now = new Date();
     const [first, second] = await Promise.all([
-      reserveDownload(test$.db, { shareLinkId: share.id, now }),
-      reserveDownload(test$.db, { shareLinkId: share.id, now }),
+      reserveOnly(share.id, now),
+      reserveOnly(share.id, now),
     ]);
     const kinds = [first.kind, second.kind].sort();
     expect(kinds).toEqual(['reserved', 'unavailable']);
@@ -453,7 +477,7 @@ suite('share links and downloads', () => {
   it('refuses a revoked link', async () => {
     const { share } = await seedReadyShare();
     await revokeShareLink(test$.db, share.id, new Date());
-    const result = await reserveDownload(test$.db, { shareLinkId: share.id, now: new Date() });
+    const result = await reserveOnly(share.id);
     expect(result).toMatchObject({ kind: 'unavailable', reason: 'revoked' });
   });
 
@@ -466,14 +490,14 @@ suite('share links and downloads', () => {
 
   it('refuses an expired link', async () => {
     const { share } = await seedReadyShare({ expiresAt: new Date(Date.now() - 1000) });
-    const result = await reserveDownload(test$.db, { shareLinkId: share.id, now: new Date() });
+    const result = await reserveOnly(share.id);
     expect(result).toMatchObject({ kind: 'unavailable', reason: 'expired' });
   });
 
   it('refuses a link whose file is still scanning', async () => {
     const { file, share } = await seedReadyShare();
     await test$.db.update(files).set({ status: 'scanning' }).where(eq(files.id, file.id));
-    const result = await reserveDownload(test$.db, { shareLinkId: share.id, now: new Date() });
+    const result = await reserveOnly(share.id);
     expect(result).toMatchObject({ kind: 'unavailable', reason: 'scanning' });
   });
 
@@ -491,23 +515,26 @@ suite('share links and downloads', () => {
       .set({ status: 'blocked', deletedAt: new Date() })
       .where(eq(files.id, file.id));
 
-    const result = await reserveDownload(test$.db, { shareLinkId: share.id, now: new Date() });
+    const result = await reserveOnly(share.id);
     expect(result).toMatchObject({ kind: 'unavailable', reason: 'blocked' });
   });
 
   it('releases a reservation when the download could not be issued', async () => {
     const { share } = await seedReadyShare({ maxDownloads: 1 });
-    await reserveDownload(test$.db, { shareLinkId: share.id, now: new Date() });
-    await releaseDownloadReservation(test$.db, share.id);
+    await reserveOnly(share.id);
+    await releaseOnly(share.id);
 
-    const result = await reserveDownload(test$.db, { shareLinkId: share.id, now: new Date() });
+    const result = await reserveOnly(share.id);
     expect(result.kind).toBe('reserved');
   });
 
   it('never drives the counter below zero when releasing', async () => {
     const { share } = await seedReadyShare();
-    await releaseDownloadReservation(test$.db, share.id);
-    const [row] = await test$.db.select().from(shareLinks).where(eq(shareLinks.id, share.id));
+    await releaseOnly(share.id);
+    const [row] = await test$.db
+      .select()
+      .from(shareLinkFiles)
+      .where(eq(shareLinkFiles.shareLinkId, share.id));
     expect(row?.downloadCount).toBe(0);
   });
 
@@ -529,7 +556,7 @@ suite('share links and downloads', () => {
   it('revokes every link for a file at once', async () => {
     const { file } = await seedReadyShare();
     await createShareLink(test$.db, {
-      fileId: file.id,
+      fileIds: [file.id],
       tokenHash: hashShareToken(generateShareToken()),
       passwordHash: null,
       expiresAt: null,
@@ -673,7 +700,21 @@ suite('cleanup jobs', () => {
 
     await test$.db.delete(files).where(eq(files.id, file.id));
 
-    const links = await test$.handle.sql`select 1 from share_links where file_id = ${file.id}`;
+    // The link no longer references a file directly, so the cascade reaches the
+    // join row and the link is left holding nothing. It is unservable that
+    // instant - a link with no files evaluates to `not_found` - and the cleanup
+    // job removes it, taking its download events with it.
+    const entries = await test$.handle
+      .sql`select 1 from share_link_files where file_id = ${file.id}`;
+    expect(entries).toHaveLength(0);
+    expect(evaluateShare(await findShareById(test$.db, share.id), new Date())).toEqual({
+      ok: false,
+      reason: 'not_found',
+    });
+
+    expect(await deleteOrphanedShareLinks(test$.db, { limit: 100 })).toBeGreaterThanOrEqual(1);
+
+    const links = await test$.handle.sql`select 1 from share_links where id = ${share.id}`;
     const events = await test$.handle
       .sql`select 1 from download_events where share_link_id = ${share.id}`;
     expect(links).toHaveLength(0);
