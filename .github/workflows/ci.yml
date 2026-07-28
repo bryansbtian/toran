@@ -356,7 +356,7 @@ jobs:
       # here previously does not exist upstream (they are `v`-prefixed), so the
       # step could never resolve its action.
       - name: Scan the web image for known vulnerabilities (report only)
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: toran-web:ci
           format: table
@@ -365,7 +365,7 @@ jobs:
           exit-code: '0'
 
       - name: Scan the worker image for known vulnerabilities (report only)
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: toran-worker:ci
           format: table
