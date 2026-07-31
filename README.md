@@ -31,19 +31,19 @@ S3-compatible object storage using short-lived presigned URLs.
 
 ---
 
-## Table of contents
+## Table of Contents
 
 - [Features](#features)
 - [Architecture](#architecture)
-- [Quick start](#quick-start)
-- [Contributor setup](#contributor-setup)
-- [Self-hosting with Docker](#self-hosting-with-docker)
-- [Environment variables](#environment-variables)
-- [Storage configuration](#storage-configuration)
-- [Production deployment](#production-deployment)
-- [Security model](#security-model)
-- [Malware scanning and its limits](#malware-scanning-and-its-limits)
-- [Backup and recovery](#backup-and-recovery)
+- [Quick Start](#quick-start)
+- [Contributor Setup](#contributor-setup)
+- [Self-Hosting with Docker](#self-hosting-with-docker)
+- [Environment Variables](#environment-variables)
+- [Storage Configuration](#storage-configuration)
+- [Production Deployment](#production-deployment)
+- [Security Model](#security-model)
+- [Malware Scanning and Its Limits](#malware-scanning-and-its-limits)
+- [Backup and Recovery](#backup-and-recovery)
 - [Upgrading](#upgrading)
 - [Administration](#administration)
 - [Troubleshooting](#troubleshooting)
@@ -110,7 +110,7 @@ needs them.
 
 ![Toran system architecture showing the browser, web application, object storage, PostgreSQL, worker, and ClamAV](docs/images/architecture.png)
 
-### Upload flow
+### Upload Flow
 
 One link may serve several files, so the link cannot exist until every file in
 the batch has been stored and verified. Creating it is therefore a step of its
@@ -142,7 +142,7 @@ own, after the per-file work.
 11. The share page shows every file with its own status, and offers a download
     only for the ones that are `ready`.
 
-### Download flow
+### Download Flow
 
 1. A visitor opens `/s/{token}`, a client-rendered shell.
 2. The page fetches `GET /api/shares/{token}`. Toran hashes the token, resolves
@@ -165,7 +165,7 @@ own, after the per-file work.
 Full detail, including every state transition and race condition, is in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-### Repository layout
+### Repository Layout
 
 ```text
 toran/
@@ -189,7 +189,7 @@ toran/
 
 ---
 
-## Quick start
+## Quick Start
 
 You need **Node.js 22+**, **npm 10+**, and **Docker** with Compose. Give Docker
 at least **4 GB of memory**; ClamAV alone needs roughly 1.5 GB.
@@ -222,7 +222,7 @@ ClamAV downloads its signature database on first boot, which takes a few
 minutes. Until it is ready, uploads sit in the `scanning` state and the share
 page says so. Watch it with `docker logs -f toran-dev-clamav`.
 
-### Sharing links on your local network
+### Sharing Links on Your Local Network
 
 `npm run dev` addresses the instance to this machine's LAN address rather than
 `localhost`, because a `localhost` link is not one you can send anyone - it
@@ -267,7 +267,7 @@ the room, and it is not a deployment. For an office instance people rely on, use
 
 ---
 
-## Contributor setup
+## Contributor Setup
 
 Every command below is run from the repository root.
 
@@ -306,7 +306,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 ---
 
-## Self-hosting with Docker
+## Self-Hosting with Docker
 
 1. Clone the repository and create `.env` from `.env.example`.
 2. Edit `.env`. Toran refuses to start with the example values.
@@ -373,7 +373,7 @@ including Caddy and nginx configurations, are in
 
 ---
 
-## Environment variables
+## Environment Variables
 
 Every variable is parsed and validated at startup by `@toran/config`. Toran
 **refuses to start in production** when a required secret is missing, still set
@@ -396,7 +396,7 @@ downgrades those checks to warnings.
 | `TORAN_LOG_LEVEL`           | `info`                  | `trace`…`fatal`                                                                        |
 | `TORAN_ABUSE_CONTACT_EMAIL` | `abuse@example.invalid` | Shown in the UI                                                                        |
 
-### Database and storage
+### Database and Storage
 
 | Variable                         | Default     | Notes                                                           |
 | -------------------------------- | ----------- | --------------------------------------------------------------- |
@@ -412,7 +412,7 @@ downgrades those checks to warnings.
 | `TORAN_UPLOAD_URL_TTL_SECONDS`   | `900`       | Presigned upload lifetime                                       |
 | `TORAN_DOWNLOAD_URL_TTL_SECONDS` | `120`       | Presigned download lifetime                                     |
 
-### Limits and abuse prevention
+### Limits and Abuse Prevention
 
 | Variable                            | Default               | Notes                                         |
 | ----------------------------------- | --------------------- | --------------------------------------------- |
@@ -432,7 +432,7 @@ downgrades those checks to warnings.
 | `TORAN_RATE_LIMIT_PASSWORD`         | `10/900`              | Per link **and** per client                   |
 | `TORAN_RATE_LIMIT_REPORT`           | `5/3600`              |                                               |
 
-### Scanning and worker
+### Scanning and Worker
 
 | Variable                              | Default              | Notes                                        |
 | ------------------------------------- | -------------------- | -------------------------------------------- |
@@ -451,13 +451,13 @@ downgrades those checks to warnings.
 
 ---
 
-## Storage configuration
+## Storage Configuration
 
 Toran talks to any S3-compatible service through one narrow interface. The
 bucket **must be private**: Toran never relies on public objects, and a public
 bucket would let anyone enumerate and read every file.
 
-### MinIO (default)
+### MinIO (Default)
 
 ```bash
 S3_ENDPOINT=http://minio:9000
@@ -480,7 +480,7 @@ S3_REGION=eu-west-1
 S3_BUCKET=my-toran-bucket
 ```
 
-### Other providers
+### Other Providers
 
 Cloudflare R2, Backblaze B2, Wasabi, Ceph RGW and Garage all work: set
 `S3_ENDPOINT` to the provider's endpoint and choose path style according to
@@ -492,7 +492,7 @@ Browsers upload directly to storage, so the bucket must allow `PUT` from your
 application origin and expose `ETag`. Provider-specific CORS configuration is
 in [docs/STORAGE.md](docs/STORAGE.md).
 
-### Upload size limits
+### Upload Size Limits
 
 The MVP uses **single-request uploads**. One `PUT` carries the whole file, so:
 
@@ -508,7 +508,7 @@ resumable uploads can be added without changing any caller. That work is on the
 
 ---
 
-## Production deployment
+## Production Deployment
 
 Docker Compose is the **primary supported path**. See
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for:
@@ -526,7 +526,7 @@ Docker Compose is the **primary supported path**. See
 
 ---
 
-## Security model
+## Security Model
 
 Toran's threat model, in one paragraph: **the share URL is a capability.**
 Anyone who has it can download every file behind it, subject to whatever limits
@@ -554,7 +554,7 @@ never trusting an uploaded byte.
 Full analysis (risk, mitigation, **remaining limitation**, and future
 improvement for each) is in [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
-### Known limitations
+### Known Limitations
 
 These are real and deliberate. Read them before trusting Toran with anything
 important.
@@ -583,7 +583,7 @@ important.
 
 ---
 
-## Malware scanning and its limits
+## Malware Scanning and Its Limits
 
 Toran streams every upload to ClamAV before a link will serve it, and **fails
 closed**: a file becomes `ready` only when clamd replies with its exact
@@ -612,7 +612,7 @@ setting. Toran refuses to start in production with it off.
 
 ---
 
-## Backup and recovery
+## Backup and Recovery
 
 **Backing up PostgreSQL alone is not enough.** The database holds metadata;
 object storage holds the files. Restoring one without the other gives you either
@@ -733,7 +733,7 @@ covers the development setup, code standards, testing expectations, and the
 review process. Issues labelled **good first issue** are scoped for a first
 contribution.
 
-By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+By participating you agree to the [Code of Conduct](docs/CONDUCT.md).
 
 To report a security vulnerability, follow [SECURITY.md](SECURITY.md). Please do
 not open a public issue.
