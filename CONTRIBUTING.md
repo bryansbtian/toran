@@ -6,11 +6,11 @@ Thanks for wanting to help. Toran is meant to be easy to run locally and easy to
 contribute to; if either of those is not true for you, that itself is a bug
 worth reporting.
 
-By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+By participating you agree to the [Code of Conduct](docs/CONDUCT.md).
 
 ---
 
-## Getting set up
+## Getting Set Up
 
 You need **Node.js 22+**, **npm 10+**, and **Docker** with Compose. Give Docker
 at least **4 GB of memory**; ClamAV alone needs roughly 1.5 GB.
@@ -39,7 +39,7 @@ the instance to this machine's LAN address, so a link you copy out of the UI is
 one you can actually send someone; with no network to bind to it falls back to
 localhost. `npm run dev:local` skips all of that and uses `.env` as it stands.
 
-### If something does not work
+### If Something Does Not Work
 
 - `npm run dev:infra:down`, then `npm run dev:setup`, resets the infrastructure.
 - ClamAV takes several minutes on first boot while it downloads signatures.
@@ -49,7 +49,7 @@ localhost. `npm run dev:local` skips all of that and uses `.env` as it stands.
 
 ---
 
-## Good first issues
+## Good First Issues
 
 Issues labelled **good first issue** are deliberately scoped so you can finish
 them in one sitting without needing the whole architecture in your head. They
@@ -77,7 +77,7 @@ fits, open an issue describing what you would like to do.
 
 ---
 
-## Repository layout
+## Repository Layout
 
 ```text
 apps/web         Next.js app: UI, API routes, request handling
@@ -97,7 +97,7 @@ built-ins); anything Node-only belongs in `security`, `storage`,
 
 ---
 
-## Development workflow
+## Development Workflow
 
 1. Branch from `main`.
 2. Make the change.
@@ -129,7 +129,7 @@ entry - "it is inconvenient to upgrade" is not a reason.
 
 ---
 
-## Code standards
+## Code Standards
 
 **TypeScript**
 
@@ -170,7 +170,7 @@ Never log a raw share token, a password, a presigned URL, or a credential.
 
 ---
 
-## Testing expectations
+## Testing Expectations
 
 | Kind        | Where                         | Needs          |
 | ----------- | ----------------------------- | -------------- |
@@ -191,7 +191,7 @@ Never add a test that requires a paid third-party service.
 
 ---
 
-## Database changes
+## Database Changes
 
 1. Edit `packages/database/src/schema.ts`.
 2. `npm run db:generate` - this writes a SQL migration.
@@ -204,7 +204,7 @@ fails if the schema and the committed migrations disagree.
 
 ---
 
-## Commits and pull requests
+## Commits and Pull Requests
 
 Conventional commits are appreciated but not enforced:
 
@@ -226,7 +226,7 @@ Do not tick a verification box for a command you did not run.
 
 ---
 
-## Licensing of contributions
+## Licensing of Contributions
 
 By submitting a contribution to Toran, you agree that your contribution is licensed under the MIT License.
 

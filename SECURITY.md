@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: MIT -->
 
-# Security policy
+# Security Policy
 
-## Reporting a vulnerability
+## Reporting a Vulnerability
 
 **Please do not open a public issue for a security vulnerability.**
 
@@ -15,14 +15,14 @@ Report privately through GitHub:
 If GitHub advisories are unavailable to you, email the maintainers at the
 address in the repository profile with `[SECURITY]` in the subject.
 
-### What to include
+### What to Include
 
 - What the vulnerability lets an attacker do.
 - The steps to reproduce it, and the version or commit you tested.
 - Whether it needs an authenticated user, a valid share link, or neither.
 - Any proof of concept, with real tokens and credentials redacted.
 
-### What to expect
+### What to Expect
 
 | Stage                    | Target                                  |
 | ------------------------ | --------------------------------------- |
@@ -40,7 +40,7 @@ We follow coordinated disclosure. Please give us a reasonable chance to ship a
 fix before publishing. We will credit you in the advisory unless you prefer
 otherwise.
 
-### Safe harbour
+### Safe Harbour
 
 We will not pursue or support legal action against research that:
 
@@ -54,7 +54,7 @@ covered, and is not something we can authorise.
 
 ---
 
-## Supported versions
+## Supported Versions
 
 Toran is pre-1.0. Only the latest release on `main` receives security fixes.
 
@@ -65,7 +65,7 @@ Toran is pre-1.0. Only the latest release on `main` receives security fixes.
 
 ---
 
-## In scope
+## In Scope
 
 - The Toran web application and API.
 - The Toran worker, job queue, and administration CLI.
@@ -73,7 +73,7 @@ Toran is pre-1.0. Only the latest release on `main` receives security fixes.
 - Default configuration values and the production start-up guards.
 - The documented deployment guidance.
 
-## Out of scope
+## Out of Scope
 
 These are known properties, documented in
 [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), not vulnerabilities:
@@ -104,7 +104,7 @@ These are known properties, documented in
 
 ---
 
-## Security properties Toran maintains
+## Security Properties Toran Maintains
 
 If you find a way to break any of these, it is a vulnerability:
 
@@ -154,7 +154,7 @@ If you find a way to break any of these, it is a vulnerability:
 
 ---
 
-## For operators
+## For Operators
 
 Running Toran for other people makes you responsible for their data. At minimum:
 
@@ -173,7 +173,7 @@ The full list is the [production checklist](docs/DEPLOYMENT.md#production-checkl
 
 ---
 
-## Secret scanning
+## Secret Scanning
 
 Enable GitHub **secret scanning** and **push protection** on any fork. Toran
 also ships `npm run secrets:scan`, which CI runs on every pull request. It is a

@@ -28,7 +28,7 @@ jobs:
   # stays on Ubuntu; without this matrix nothing would catch a script or path
   # that only works on one of them.
   static:
-    name: Format, lint, types, unit tests (${{ matrix.os }})
+    name: Format, Lint, Types, Unit Tests (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -49,10 +49,10 @@ jobs:
           # directory per platform, so the matrix needs no path overrides.
           cache: npm
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: Check formatting
+      - name: Check Formatting
         run: npm run format:check
 
       - name: Lint
@@ -61,7 +61,7 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Unit tests
+      - name: Unit Tests
         run: npm test
 
       # `next build` is slow and the images are built on Linux anyway, so one
@@ -73,7 +73,7 @@ jobs:
 
   # Migrations must apply to an empty database and be idempotent.
   migrations:
-    name: Migration validation
+    name: Migration Validation
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -107,13 +107,13 @@ jobs:
       - run: npm run build --workspace=@toran/storage
       - run: npm run build --workspace=@toran/database
 
-      - name: Apply migrations to an empty database
+      - name: Apply Migrations to an Empty Database
         run: npm run db:migrate
 
-      - name: Re-apply migrations (must be a no-op)
+      - name: Re-Apply Migrations (Must Be a No-Op)
         run: npm run db:migrate
 
-      - name: Fail if the schema has uncommitted drift
+      - name: Fail if the Schema Has Uncommitted Drift
         run: |
           npm run db:generate --workspace=@toran/database -- --name ci-drift-check
           if [ -n "$(git status --porcelain packages/database/drizzle)" ]; then
@@ -124,7 +124,7 @@ jobs:
           fi
 
   integration:
-    name: Integration tests
+    name: Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
@@ -161,11 +161,11 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run build
       - run: npm run db:migrate
-      - name: Integration tests
+      - name: Integration Tests
         run: npm run test:integration
 
   e2e:
-    name: End-to-end tests
+    name: End-to-End Tests
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -187,7 +187,7 @@ jobs:
       # then surfaced as an unrelated Playwright timeout minutes later. Each
       # wait below either observes `healthy` or fails the job with that
       # container's logs attached.
-      - name: Wait for infrastructure
+      - name: Wait for Infrastructure
         run: |
           set -euo pipefail
 
@@ -217,7 +217,7 @@ jobs:
 
           docker ps --filter name=toran-dev --format '{{.Names}} {{.Status}}'
 
-      - name: Create the bucket
+      - name: Create the Bucket
         run: |
           docker exec toran-dev-minio mc alias set local http://127.0.0.1:9000 toranminio toranminio-dev-secret
           docker exec toran-dev-minio mc mb --ignore-existing local/toran
@@ -226,7 +226,7 @@ jobs:
       - run: npm run build
       - run: npm run db:migrate
 
-      - name: Install Playwright browsers
+      - name: Install Playwright Browsers
         run: npx playwright install --with-deps chromium
         working-directory: apps/web
 
@@ -234,7 +234,7 @@ jobs:
       # `npm run dev` - the LAN helper. That rewrites `.env` and recreates the
       # MinIO container with a different allowed upload origin, so a test run
       # would reconfigure the environment underneath itself.
-      - name: Start the web app and the worker
+      - name: Start the Web App and the Worker
         run: |
           npm run dev --workspace=@toran/web > /tmp/toran-web.log 2>&1 &
           echo $! > /tmp/web.pid
@@ -245,7 +245,7 @@ jobs:
       # to guess at a startup delay. `/api/ready` and `/ready` both touch their
       # dependencies; the liveness endpoints would answer before the database
       # and the bucket were usable.
-      - name: Wait for the web app and the worker to be ready
+      - name: Wait for the Web App and the Worker to Be Ready
         run: |
           set -euo pipefail
 
@@ -268,14 +268,14 @@ jobs:
           await_ready "toran-web" http://127.0.0.1:3000/api/ready /tmp/toran-web.log 90
           await_ready "toran-worker" http://127.0.0.1:3001/ready /tmp/toran-worker.log 30
 
-      - name: Run Playwright tests
+      - name: Run Playwright Tests
         run: npm run test:e2e
         env:
           CI: 'true'
           # The servers are already up and waited on above.
           TORAN_E2E_NO_SERVER: '1'
 
-      - name: Server logs on failure
+      - name: Server Logs on Failure
         if: failure()
         run: |
           echo '--- web ---'
@@ -283,7 +283,7 @@ jobs:
           echo '--- worker ---'
           tail -n 200 /tmp/toran-worker.log || true
 
-      - name: Upload Playwright report
+      - name: Upload Playwright Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -291,7 +291,7 @@ jobs:
           path: apps/web/playwright-report/
           retention-days: 7
 
-      - name: Stop the servers and the infrastructure
+      - name: Stop the Servers and the Infrastructure
         if: always()
         run: |
           for pidfile in /tmp/web.pid /tmp/worker.pid; do
@@ -300,7 +300,7 @@ jobs:
           docker compose -f docker-compose.dev.yml down -v
 
   docker:
-    name: Docker images
+    name: Docker Images
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -310,7 +310,7 @@ jobs:
       # which would then run here with access to the workflow's token.
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
-      - name: Build the web image
+      - name: Build the Web Image
         uses: docker/build-push-action@67a2d409c0a876cbe6b11854e3e25193efe4e62d # v6.12.0
         with:
           context: .
@@ -321,7 +321,7 @@ jobs:
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
 
-      - name: Build the worker image
+      - name: Build the Worker Image
         uses: docker/build-push-action@67a2d409c0a876cbe6b11854e3e25193efe4e62d # v6.12.0
         with:
           context: .
@@ -332,7 +332,7 @@ jobs:
           cache-from: type=gha,scope=worker
           cache-to: type=gha,mode=max,scope=worker
 
-      - name: Fail if an image runs as root
+      - name: Fail if an Image Runs as Root
         run: |
           for image in toran-web:ci toran-worker:ci; do
             user=$(docker image inspect "$image" --format '{{.Config.User}}')
@@ -352,11 +352,14 @@ jobs:
       # everything Toran distributes had been checked. The worker is the image
       # that matters most here: it is the only component that reads file bytes.
       #
-      # Pinned to a commit SHA rather than a tag; the tag `0.28.0` referenced
-      # here previously does not exist upstream (they are `v`-prefixed), so the
-      # step could never resolve its action.
-      - name: Scan the web image for known vulnerabilities (report only)
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+      # Pinned to a commit SHA rather than a tag. v0.28.0 was used here before
+      # and had to go: it referenced `aquasecurity/setup-trivy@v0.2.1` by tag,
+      # and upstream has since deleted every setup-trivy tag below v0.2.6. The
+      # job then died in "Set up job" - before running a single step - with
+      # "unable to find version `v0.2.1`". v0.36.0 pins setup-trivy by SHA, so
+      # an upstream tag deletion cannot break this job again.
+      - name: Scan the Web Image for Known Vulnerabilities (Report Only)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: toran-web:ci
           format: table
@@ -364,8 +367,8 @@ jobs:
           ignore-unfixed: true
           exit-code: '0'
 
-      - name: Scan the worker image for known vulnerabilities (report only)
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+      - name: Scan the Worker Image for Known Vulnerabilities (Report Only)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: toran-worker:ci
           format: table
@@ -374,7 +377,7 @@ jobs:
           exit-code: '0'
 
   secrets:
-    name: Secret scan
+    name: Secret Scan
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -382,5 +385,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Check for committed secrets
+      - name: Check for Committed Secrets
         run: node scripts/check-secrets.mjs
