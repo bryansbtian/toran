@@ -7,7 +7,5 @@ playwright-report
 test-results
 package-lock.json
 *.min.js
-LICENSE
-CHANGELOG.md
 packages/database/drizzle
 .data

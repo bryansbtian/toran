@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: MIT */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -15,20 +14,20 @@
  */
 @layer base {
   :root {
-    --toran-surface: 248 250 252;
+    --toran-surface: 250 250 249;
     --toran-surface-raised: 255 255 255;
-    --toran-surface-sunken: 241 245 249;
-    --toran-ink: 15 23 42;
-    --toran-ink-muted: 71 85 105;
-    --toran-ink-subtle: 148 163 184;
-    --toran-line: 226 232 240;
+    --toran-surface-sunken: 245 245 244;
+    --toran-ink: 28 25 23;
+    --toran-ink-muted: 87 83 78;
+    --toran-ink-subtle: 168 162 158;
+    --toran-line: 231 229 228;
 
-    --toran-brand-50: 240 253 250;
-    --toran-brand-200: 153 246 228;
-    --toran-brand-500: 20 184 166;
-    --toran-brand-600: 15 118 110;
-    --toran-brand-700: 17 94 89;
-    --toran-brand-800: 19 78 74;
+    --toran-brand-50: 255 247 237;
+    --toran-brand-200: 254 215 170;
+    --toran-brand-500: 249 115 22;
+    --toran-brand-600: 194 65 12;
+    --toran-brand-700: 154 52 18;
+    --toran-brand-800: 124 45 18;
 
     --toran-success-50: 240 253 244;
     --toran-success-200: 187 247 208;
@@ -48,20 +47,20 @@
   }
 
   [data-theme='dark'] {
-    --toran-surface: 2 6 23;
-    --toran-surface-raised: 15 23 42;
-    --toran-surface-sunken: 30 41 59;
-    --toran-ink: 248 250 252;
-    --toran-ink-muted: 165 180 199;
-    --toran-ink-subtle: 100 116 139;
-    --toran-line: 51 65 85;
+    --toran-surface: 18 18 18;
+    --toran-surface-raised: 30 29 28;
+    --toran-surface-sunken: 41 40 38;
+    --toran-ink: 250 250 249;
+    --toran-ink-muted: 168 162 158;
+    --toran-ink-subtle: 120 113 108;
+    --toran-line: 64 62 60;
 
-    --toran-brand-50: 19 78 74;
-    --toran-brand-200: 45 212 191;
-    --toran-brand-500: 45 212 191;
-    --toran-brand-600: 20 184 166;
-    --toran-brand-700: 45 212 191;
-    --toran-brand-800: 153 246 228;
+    --toran-brand-50: 67 20 7;
+    --toran-brand-200: 253 186 116;
+    --toran-brand-500: 249 115 22;
+    --toran-brand-600: 234 88 12;
+    --toran-brand-700: 249 115 22;
+    --toran-brand-800: 254 215 170;
 
     --toran-success-50: 20 63 40;
     --toran-success-200: 74 222 128;
@@ -110,6 +109,23 @@
 }
 
 @layer components {
+  /*
+   * Custom select arrow. The native one is painted at the very edge of the
+   * control and ignores padding, so it is switched off and redrawn here, inset
+   * from the right and sized to match the chevrons used elsewhere. Two stroke
+   * colours because a background image cannot inherit `currentColor`.
+   */
+  .toran-select {
+    @apply appearance-none bg-no-repeat pr-10;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2357534e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-position: right 0.875rem center;
+    background-size: 1rem 1rem;
+  }
+
+  [data-theme='dark'] .toran-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a8a29e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  }
+
   .toran-skip-link {
     @apply sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50
       focus:rounded-lg focus:bg-brand-600 focus:px-4 focus:py-2 focus:text-white;

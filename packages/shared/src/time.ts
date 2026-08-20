@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: MIT
-
 /**
  * Injectable clock. Every expiry decision in Toran takes one of these so tests
  * can advance time without sleeping and so the worker and API agree on `now`.
@@ -34,8 +32,12 @@ export function resolveExpiry(options: ExpiryOptions, clock: Clock = systemClock
   if (!Number.isFinite(requested) || !Number.isInteger(requested)) {
     return { ok: false, reason: 'INVALID' };
   }
-  if (requested < MIN_EXPIRY_SECONDS) return { ok: false, reason: 'TOO_SHORT' };
-  if (requested > options.maxSeconds) return { ok: false, reason: 'TOO_LONG' };
+  if (requested < MIN_EXPIRY_SECONDS) {
+    return { ok: false, reason: 'TOO_SHORT' };
+  }
+  if (requested > options.maxSeconds) {
+    return { ok: false, reason: 'TOO_LONG' };
+  }
   return {
     ok: true,
     seconds: requested,
@@ -45,7 +47,9 @@ export function resolveExpiry(options: ExpiryOptions, clock: Clock = systemClock
 
 /** Expiry is exclusive: an instant exactly equal to `expiresAt` is expired. */
 export function isExpired(expiresAt: Date | null | undefined, clock: Clock = systemClock): boolean {
-  if (!expiresAt) return false;
+  if (!expiresAt) {
+    return false;
+  }
   return expiresAt.getTime() <= clock.now().getTime();
 }
 

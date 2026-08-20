@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { createServer, type Server } from 'node:net';
 import { Readable } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -29,13 +28,17 @@ describe('interpretReply', () => {
   it('treats a generic error as retryable', () => {
     const verdict = interpretReply('INSTREAM: Unexpected ERROR');
     expect(verdict.kind).toBe('error');
-    if (verdict.kind === 'error') expect(verdict.retryable).toBe(true);
+    if (verdict.kind === 'error') {
+      expect(verdict.retryable).toBe(true);
+    }
   });
 
   it('treats a size-limit error as permanent', () => {
     const verdict = interpretReply('INSTREAM size limit exceeded. ERROR');
     expect(verdict.kind).toBe('error');
-    if (verdict.kind === 'error') expect(verdict.retryable).toBe(false);
+    if (verdict.kind === 'error') {
+      expect(verdict.retryable).toBe(false);
+    }
   });
 
   it('never reads an empty or unknown reply as clean', () => {
@@ -66,8 +69,12 @@ function fakeClamd(reply: string, options: { closeEarly?: boolean } = {}): Promi
       let seenTerminator = false;
       socket.on('data', (chunk) => {
         // The INSTREAM terminator is a zero-length chunk header.
-        if (chunk.includes(Buffer.from([0, 0, 0, 0]))) seenTerminator = true;
-        if (!seenTerminator) return;
+        if (chunk.includes(Buffer.from([0, 0, 0, 0]))) {
+          seenTerminator = true;
+        }
+        if (!seenTerminator) {
+          return;
+        }
         if (options.closeEarly) {
           socket.destroy();
           return;
@@ -83,7 +90,9 @@ function fakeClamd(reply: string, options: { closeEarly?: boolean } = {}): Promi
 
 function portOf(server: Server): number {
   const address = server.address();
-  if (typeof address === 'string' || address === null) throw new Error('no port');
+  if (typeof address === 'string' || address === null) {
+    throw new Error('no port');
+  }
   return address.port;
 }
 
@@ -91,7 +100,9 @@ describe('ClamAvScanner', () => {
   let server: Server | undefined;
 
   afterEach(async () => {
-    if (server) await new Promise((resolve) => server!.close(resolve));
+    if (server) {
+      await new Promise((resolve) => server!.close(resolve));
+    }
     server = undefined;
   });
 
@@ -120,14 +131,18 @@ describe('ClamAvScanner', () => {
     server = await fakeClamd('stream: OK', { closeEarly: true });
     const verdict = await scanner(portOf(server)).scanStream(Readable.from([Buffer.from('x')]), 1);
     expect(verdict.kind).toBe('error');
-    if (verdict.kind === 'error') expect(verdict.retryable).toBe(true);
+    if (verdict.kind === 'error') {
+      expect(verdict.retryable).toBe(true);
+    }
   });
 
   it('fails closed when clamd is unreachable', async () => {
     // Port 1 is reserved and nothing listens on it.
     const verdict = await scanner(1).scanStream(Readable.from([Buffer.from('x')]), 1);
     expect(verdict.kind).toBe('error');
-    if (verdict.kind === 'error') expect(verdict.retryable).toBe(true);
+    if (verdict.kind === 'error') {
+      expect(verdict.retryable).toBe(true);
+    }
   });
 
   it('refuses to scan an object above the configured ceiling', async () => {
@@ -138,7 +153,9 @@ describe('ClamAvScanner', () => {
     );
     expect(verdict.kind).toBe('error');
     // Permanent: no retry will make an oversized object scannable.
-    if (verdict.kind === 'error') expect(verdict.retryable).toBe(false);
+    if (verdict.kind === 'error') {
+      expect(verdict.retryable).toBe(false);
+    }
   });
 
   it('stops when a stream grows past the ceiling mid-scan', async () => {
@@ -147,7 +164,9 @@ describe('ClamAvScanner', () => {
     // Declared size passes the pre-check; the actual stream does not.
     const verdict = await scanner(portOf(server), 100).scanStream(oversized, 50);
     expect(verdict.kind).toBe('error');
-    if (verdict.kind === 'error') expect(verdict.retryable).toBe(false);
+    if (verdict.kind === 'error') {
+      expect(verdict.retryable).toBe(false);
+    }
   });
 
   it('fails closed when the object stream ends before the declared size', async () => {

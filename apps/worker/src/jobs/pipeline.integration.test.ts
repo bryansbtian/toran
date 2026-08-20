@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { loadConfig, type ToranConfig } from '@toran/config';
@@ -30,7 +29,10 @@ import type { ScanVerdict, Scanner } from '../scanning/clamav.js';
 import { JobRunner } from '../runner.js';
 
 const reachable = allowIntegrationSkip(await isDatabaseReachable(), 'worker integration tests');
-const suite = reachable ? describe : describe.skip;
+let suite: typeof describe | typeof describe.skip = describe.skip;
+if (reachable) {
+  suite = describe;
+}
 
 /** Scripted scanner so tests can drive every verdict deterministically. */
 class ScriptedScanner implements Scanner {

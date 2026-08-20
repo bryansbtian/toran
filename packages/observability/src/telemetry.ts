@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { SpanStatusCode, trace, type Span, type Tracer } from '@opentelemetry/api';
 
 /**
@@ -6,9 +5,8 @@ import { SpanStatusCode, trace, type Span, type Tracer } from '@opentelemetry/ap
  *
  * Toran depends only on `@opentelemetry/api`, never on an SDK. With no SDK
  * registered the API is a no-op, so instrumentation costs nothing by default.
- * Operators who want traces register a provider in their own bootstrap (see
- * `docs/OBSERVABILITY.md`) and every span below starts flowing without any
- * change to Toran.
+ * Registering a provider in the deployment's own bootstrap makes every span
+ * below start flowing without any change to Toran.
  */
 export function getTracer(name = 'toran'): Tracer {
   return trace.getTracer(name);
@@ -27,18 +25,21 @@ export async function withSpan<T>(
   const tracer = getTracer();
   return tracer.startActiveSpan(name, async (span) => {
     for (const [key, value] of Object.entries(attributes)) {
-      if (value !== undefined) span.setAttribute(key, value);
+      if (value !== undefined) {
+        span.setAttribute(key, value);
+      }
     }
     try {
       const result = await fn(span);
       span.setStatus({ code: SpanStatusCode.OK });
       return result;
     } catch (error) {
-      span.setStatus({
-        code: SpanStatusCode.ERROR,
-        // Only the error name: messages can carry request detail.
-        message: error instanceof Error ? error.name : 'error',
-      });
+      // Only the error name: messages can carry request detail.
+      let name = 'error';
+      if (error instanceof Error) {
+        name = error.name;
+      }
+      span.setStatus({ code: SpanStatusCode.ERROR, message: name });
       throw error;
     } finally {
       span.end();
@@ -64,7 +65,9 @@ export class MetricsRecorder {
 
   record(name: string, value: number, attributes: SpanAttributes = {}): void {
     this.samples.push({ name, value, attributes });
-    if (this.samples.length > 1000) this.samples.shift();
+    if (this.samples.length > 1000) {
+      this.samples.shift();
+    }
   }
 
   drain(): MetricSample[] {

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 import { loadConfig, type ToranConfig } from '@toran/config';
 import { buildGrantCookie, clearGrantCookie, readCookie } from '@/server/cookies';
@@ -14,10 +13,13 @@ const baseEnv: Record<string, string> = {
 const configWith = (overrides: Record<string, string> = {}): ToranConfig =>
   loadConfig({ source: { ...baseEnv, ...overrides }, skipDotenv: true, onWarning: () => {} });
 
-const request = (cookieHeader: string | null): Request =>
-  new Request('https://toran.example/s/abc', {
-    headers: cookieHeader === null ? {} : { cookie: cookieHeader },
-  });
+const request = (cookieHeader: string | null): Request => {
+  const headers: Record<string, string> = {};
+  if (cookieHeader !== null) {
+    headers.cookie = cookieHeader;
+  }
+  return new Request('https://toran.example/s/abc', { headers });
+};
 
 describe('readCookie', () => {
   it('reads a single cookie', () => {

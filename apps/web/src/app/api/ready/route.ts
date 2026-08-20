@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+import { errorMessage } from '@toran/shared';
 import { pingDatabase } from '@toran/database';
 import { getServerContext } from '@/server/context';
 
@@ -31,7 +31,7 @@ export async function GET(): Promise<Response> {
     // ConfigurationError messages name variables, never their values.
     console.error(
       '[toran] readiness check could not build the server context:',
-      error instanceof Error ? error.message : 'unknown error',
+      errorMessage(error),
     );
     return respond({ configuration: { ok: false, detail: 'invalid configuration' } });
   }
@@ -42,10 +42,11 @@ export async function GET(): Promise<Response> {
   ]);
 
   checks.rateLimiter = { ok: true, detail: context.rateLimiter.backend };
-  checks.scanning = {
-    ok: true,
-    detail: context.config.scanning.enabled ? 'enabled' : 'disabled (development only)',
-  };
+  let scanningDetail = 'disabled (development only)';
+  if (context.config.scanning.enabled) {
+    scanningDetail = 'enabled';
+  }
+  checks.scanning = { ok: true, detail: scanningDetail };
 
   return respond(checks);
 }
@@ -65,8 +66,16 @@ async function run(
 
 function respond(checks: Record<string, Check>): Response {
   const ready = Object.values(checks).every((check) => check.ok);
-  return new Response(JSON.stringify({ status: ready ? 'ready' : 'degraded', checks }), {
-    status: ready ? 200 : 503,
+
+  let status = 'degraded';
+  let httpStatus = 503;
+  if (ready) {
+    status = 'ready';
+    httpStatus = 200;
+  }
+
+  return new Response(JSON.stringify({ status, checks }), {
+    status: httpStatus,
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
   });
 }

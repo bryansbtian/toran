@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { z } from 'zod';
 import {
   cleanupStaleUploads,
@@ -192,10 +191,14 @@ export const reconcileStorageJob: JobHandler<typeof emptyPayload> = {
     const keys = await listLiveStorageKeys(context.db, { limit: batch, offset: 0 });
     for (const key of keys) {
       const head = await context.storage.headObject(key).catch(() => null);
-      if (head) continue;
+      if (head) {
+        continue;
+      }
       const file = await findFileByStorageKey(context.db, key);
       // Only files that should have an object by now count as inconsistent.
-      if (!file || file.status === 'pending' || file.status === 'uploading') continue;
+      if (!file || file.status === 'pending' || file.status === 'uploading') {
+        continue;
+      }
       await markFileStatus(context.db, {
         fileId: file.id,
         status: 'failed',

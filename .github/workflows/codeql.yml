@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 name: CodeQL
 
 on:
@@ -7,40 +6,35 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    # Weekly, so newly published queries reach an unchanged codebase.
-    - cron: '17 4 * * 1'
+    - cron: '0 6 * * 1'
 
 permissions:
   contents: read
 
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   analyze:
-    name: Analyze
+    name: Analyze JavaScript and TypeScript
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     permissions:
-      actions: read
       contents: read
+      actions: read
       security-events: write
-
-    strategy:
-      fail-fast: false
-      matrix:
-        language: ['javascript-typescript']
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v7
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4.37.7
         with:
-          languages: ${{ matrix.language }}
-          queries: security-extended
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+          languages: javascript-typescript
+          build-mode: none
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4.37.7
         with:
-          category: '/language:${{ matrix.language }}'
+          category: '/language:javascript-typescript'

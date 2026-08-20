@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { loadConfig, type ToranConfig } from '@toran/config';
 import { createDatabase, type DatabaseHandle } from '@toran/database';
 import { createLogger } from '@toran/observability';
@@ -14,7 +13,9 @@ export interface WorkerRuntime {
 }
 
 export function buildScanner(config: ToranConfig): Scanner {
-  if (!config.scanning.enabled) return new DisabledScanner();
+  if (!config.scanning.enabled) {
+    return new DisabledScanner();
+  }
   return new ClamAvScanner({
     host: config.scanning.clamavHost,
     port: config.scanning.clamavPort,

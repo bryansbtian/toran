@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: MIT
-
 /**
  * Applies the stored or system theme before first paint.
  *

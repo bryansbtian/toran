@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { sql } from 'drizzle-orm';
 import {
   bigint,
@@ -33,17 +32,6 @@ export const uploadSessionStatus = pgEnum('upload_session_status', [
 ]);
 
 export const jobStatus = pgEnum('job_status', ['queued', 'running', 'succeeded', 'failed', 'dead']);
-
-export const reportReason = pgEnum('report_reason', [
-  'malware',
-  'phishing',
-  'copyright',
-  'harassment',
-  'illegal',
-  'other',
-]);
-
-export const reportStatus = pgEnum('report_status', ['open', 'actioned', 'dismissed']);
 
 /**
  * Accounts are not used by the anonymous MVP flow, but the table and the
@@ -294,28 +282,6 @@ export const jobs = pgTable(
   ],
 );
 
-export const abuseReports = pgTable(
-  'abuse_reports',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    /** Null once the link is deleted; `token_hash` keeps the report traceable. */
-    shareLinkId: uuid('share_link_id').references(() => shareLinks.id, { onDelete: 'set null' }),
-    tokenHash: text('token_hash').notNull(),
-    reason: reportReason('reason').notNull(),
-    details: text('details'),
-    contactEmail: text('contact_email'),
-    /** Rotating HMAC of the reporter. Never exposed to the uploader. */
-    reporterIdentifier: text('reporter_identifier').notNull(),
-    status: reportStatus('status').notNull().default('open'),
-    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
-  },
-  (table) => [
-    index('abuse_reports_status_idx').on(table.status),
-    index('abuse_reports_share_link_idx').on(table.shareLinkId),
-    index('abuse_reports_created_at_idx').on(table.createdAt),
-  ],
-);
-
 /**
  * Fixed-window counters for the PostgreSQL rate limiter. Rows are disposable;
  * the cleanup job prunes windows that can no longer be current.
@@ -343,4 +309,3 @@ export type ShareLinkRow = typeof shareLinks.$inferSelect;
 export type ShareLinkFileRow = typeof shareLinkFiles.$inferSelect;
 export type DownloadEventRow = typeof downloadEvents.$inferSelect;
 export type JobRow = typeof jobs.$inferSelect;
-export type AbuseReportRow = typeof abuseReports.$inferSelect;

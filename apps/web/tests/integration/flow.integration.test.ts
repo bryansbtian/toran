@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ToranError } from '@toran/shared';
 import { hashShareToken } from '@toran/security';
@@ -13,7 +12,10 @@ import {
 } from './harness';
 
 const reachable = allowIntegrationSkip(await isDatabaseReachable(), 'web integration tests');
-const suite = reachable ? describe : describe.skip;
+let suite: typeof describe | typeof describe.skip = describe.skip;
+if (reachable) {
+  suite = describe;
+}
 
 let harness: TestHarness;
 
@@ -33,11 +35,16 @@ async function uploadFile(
 
   // Password and download limit belong to the link, not the upload, so they are
   // applied by `createShare` below.
+  const lifetime: { expiresInSeconds?: number } = {};
+  if (options.expiresInSeconds) {
+    lifetime.expiresInSeconds = options.expiresInSeconds;
+  }
+
   const session = await beginUpload(context, {
     filename: options.filename ?? 'report.pdf',
     size: contents.length,
     contentType: options.contentType ?? 'application/pdf',
-    ...(options.expiresInSeconds ? { expiresInSeconds: options.expiresInSeconds } : {}),
+    ...lifetime,
   });
 
   // Stand in for the browser's direct PUT to object storage.
@@ -52,12 +59,19 @@ async function uploadFile(
   // Minting the link is its own step: one link may serve several files, so it
   // cannot exist until every upload in the batch has finished. This fixture
   // covers the whole flow, so it returns the link alongside the file.
+  const linkOptions: { password?: string; maxDownloads?: number } = {};
+  if (options.password) {
+    linkOptions.password = options.password;
+  }
+  if (options.maxDownloads) {
+    linkOptions.maxDownloads = options.maxDownloads;
+  }
+
   const created = await createShare(context, {
     fileIds: [completed.file.fileId],
     manageKeys: [completed.manageKey],
-    ...(options.expiresInSeconds ? { expiresInSeconds: options.expiresInSeconds } : {}),
-    ...(options.password ? { password: options.password } : {}),
-    ...(options.maxDownloads ? { maxDownloads: options.maxDownloads } : {}),
+    ...lifetime,
+    ...linkOptions,
   });
 
   return {

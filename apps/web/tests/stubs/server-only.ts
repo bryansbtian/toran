@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 /**
  * Stand-in for Next.js's `server-only` marker package.
  *

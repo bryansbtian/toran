@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import type {
   CompleteUploadResponse,
   CreateShareResponse,
@@ -10,6 +9,18 @@ import type {
 } from '@toran/shared';
 
 /** Client-side view of a Toran API failure. */
+/**
+ * Message to show for a failed call. An `ApiError` carries text the server
+ * curated for display; anything else is an unexpected client fault whose real
+ * message would mean nothing to the person reading it.
+ */
+export function apiErrorMessage(caught: unknown, fallback: string): string {
+  if (caught instanceof ApiError) {
+    return caught.message;
+  }
+  return fallback;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly code: ErrorCode | 'NETWORK_ERROR',
@@ -38,16 +49,25 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   const text = await response.text();
-  const body: unknown = text.length > 0 ? safeParse(text) : {};
+  let body: unknown = {};
+  if (text.length > 0) {
+    body = safeParse(text);
+  }
 
   if (!response.ok) {
     const error = (body as { error?: { code?: ErrorCode; message?: string } }).error;
+
     const retryAfter = Number(response.headers.get('retry-after') ?? '');
+    let retryAfterSeconds: number | undefined;
+    if (Number.isFinite(retryAfter) && retryAfter > 0) {
+      retryAfterSeconds = retryAfter;
+    }
+
     throw new ApiError(
       error?.code ?? 'INTERNAL_ERROR',
       error?.message ?? 'Something went wrong. Please try again.',
       response.status,
-      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
+      retryAfterSeconds,
     );
   }
   return body as T;
@@ -129,19 +149,14 @@ export function authorizeShare(token: string, password: string): Promise<{ autho
 
 /** `fileId` may be omitted only when the link serves exactly one file. */
 export function requestDownload(token: string, fileId?: string): Promise<DownloadResponse> {
+  const body: { fileId?: string } = {};
+  if (fileId !== undefined) {
+    body.fileId = fileId;
+  }
   return call<DownloadResponse>(`/api/shares/${encodeURIComponent(token)}/download`, {
     method: 'POST',
-    body: JSON.stringify(fileId === undefined ? {} : { fileId }),
+    body: JSON.stringify(body),
   });
-}
-
-export function submitReport(input: {
-  link: string;
-  reason: string;
-  details?: string;
-  contactEmail?: string;
-}): Promise<{ received: boolean }> {
-  return call('/api/reports', { method: 'POST', body: JSON.stringify(input) });
 }
 
 export interface UploadProgress {
@@ -172,17 +187,23 @@ export function uploadToStorage(input: {
     for (const [key, value] of Object.entries(input.headers)) {
       // Content-Length is set by the browser and cannot be assigned; the
       // presigned URL still binds it, so the signature enforces the size.
-      if (key.toLowerCase() === 'content-length') continue;
+      if (key.toLowerCase() === 'content-length') {
+        continue;
+      }
       request.setRequestHeader(key, value);
     }
 
     request.upload.addEventListener('progress', (event) => {
-      if (!event.lengthComputable) return;
-      input.onProgress({
-        loaded: event.loaded,
-        total: event.total,
-        percent: event.total > 0 ? (event.loaded / event.total) * 100 : 0,
-      });
+      if (!event.lengthComputable) {
+        return;
+      }
+      // A zero total means the browser has not sized the body yet; reporting
+      // 0% is honest, where dividing by it is not.
+      let percent = 0;
+      if (event.total > 0) {
+        percent = (event.loaded / event.total) * 100;
+      }
+      input.onProgress({ loaded: event.loaded, total: event.total, percent });
     });
 
     request.addEventListener('load', () => {
@@ -222,6 +243,8 @@ function storageErrorMessage(status: number): string {
   if (status === 400) {
     return 'Storage rejected the upload because the file did not match what was authorised.';
   }
-  if (status >= 500) return 'Storage is temporarily unavailable. Please try again in a moment.';
+  if (status >= 500) {
+    return 'Storage is temporarily unavailable. Please try again in a moment.';
+  }
   return `Storage rejected the upload (HTTP ${status}).`;
 }

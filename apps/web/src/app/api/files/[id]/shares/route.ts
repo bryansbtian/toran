@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { ToranError, uuidSchema } from '@toran/shared';
 import { MANAGE_GRANT_HEADER, verifyGrant } from '@toran/security';
 import { findShareById, listSharesForFile } from '@toran/database';
@@ -27,7 +26,9 @@ export const GET = handler<{ id: string }>(
     const shares = [];
     for (const row of rows) {
       const found = await findShareById(context.db, row.id);
-      if (!found) continue;
+      if (!found) {
+        continue;
+      }
       shares.push(
         toShareSummary(
           found.share,
@@ -50,7 +51,9 @@ async function authorizeFile(
   rawId: string,
 ): Promise<string> {
   const parsed = uuidSchema.safeParse(rawId);
-  if (!parsed.success) throw new ToranError('NOT_FOUND');
+  if (!parsed.success) {
+    throw new ToranError('NOT_FOUND');
+  }
 
   const grant = verifyGrant(request.headers.get(MANAGE_GRANT_HEADER), {
     purpose: 'manage',

@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: MIT
-
 /**
  * File lifecycle.
  *
@@ -49,25 +47,6 @@ export const JOB_TYPES = [
   'reconcile_storage',
 ] as const;
 export type JobType = (typeof JOB_TYPES)[number];
-
-export const REPORT_REASONS = [
-  'malware',
-  'phishing',
-  'copyright',
-  'harassment',
-  'illegal',
-  'other',
-] as const;
-export type ReportReason = (typeof REPORT_REASONS)[number];
-
-export const REPORT_REASON_LABELS: Record<ReportReason, string> = {
-  malware: 'Malware',
-  phishing: 'Phishing',
-  copyright: 'Copyright',
-  harassment: 'Harassment',
-  illegal: 'Illegal content',
-  other: 'Other',
-};
 
 /** Why a share link cannot currently be used. `null` means it can. */
 export type ShareUnavailableReason =

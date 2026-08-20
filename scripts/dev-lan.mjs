@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: MIT
 
 /**
  * Runs a development instance on this machine's LAN address, so other people on
@@ -51,8 +50,12 @@ const fail = (message) => console.error(`    ✗ ${message}`);
  */
 function npmCommand(args) {
   const npmCli = process.env.npm_execpath;
-  if (npmCli) return [process.execPath, [npmCli, ...args]];
-  if (process.platform !== 'win32') return ['npm', args];
+  if (npmCli) {
+    return [process.execPath, [npmCli, ...args]];
+  }
+  if (process.platform !== 'win32') {
+    return ['npm', args];
+  }
   const bundled = path.join(
     path.dirname(process.execPath),
     'node_modules',
@@ -67,11 +70,19 @@ function npmCommand(args) {
  * Runs a command without a shell, so arguments reach the process verbatim and
  * nothing depends on cmd.exe, PowerShell or sh quoting rules.
  */
+/** Capturing output means piping it; otherwise the child shares this terminal. */
+function stdioFor(quiet) {
+  if (quiet) {
+    return ['ignore', 'pipe', 'pipe'];
+  }
+  return 'inherit';
+}
+
 function run(command, args, { quiet = false } = {}) {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd: root,
-      stdio: quiet ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+      stdio: stdioFor(quiet),
       shell: false,
     });
     let stdout = '';
@@ -109,8 +120,12 @@ function isPrivateAddress(address) {
  * is still chosen when it is the only candidate.
  */
 function rank(name) {
-  if (/wi-?fi|wireless|^wl/i.test(name)) return 0;
-  if (/ethernet|^e(n|th|m)/i.test(name)) return 1;
+  if (/wi-?fi|wireless|^wl/i.test(name)) {
+    return 0;
+  }
+  if (/ethernet|^e(n|th|m)/i.test(name)) {
+    return 1;
+  }
   return 2;
 }
 
@@ -120,9 +135,15 @@ function candidateAddresses() {
     for (const entry of addresses ?? []) {
       // Node <18.4 reported `family` as a number; both forms appear in the wild.
       const isIPv4 = entry.family === 'IPv4' || entry.family === 4;
-      if (!isIPv4 || entry.internal) continue;
-      if (/^169\.254\./.test(entry.address)) continue; // link-local, no DHCP
-      if (!isPrivateAddress(entry.address)) continue;
+      if (!isIPv4 || entry.internal) {
+        continue;
+      }
+      if (/^169\.254\./.test(entry.address)) {
+        continue;
+      } // link-local, no DHCP
+      if (!isPrivateAddress(entry.address)) {
+        continue;
+      }
       found.push({
         name,
         address: entry.address,
@@ -153,13 +174,18 @@ function withHost(currentValue, host, fallbackPort) {
 
 function readValue(contents, key) {
   const match = contents.match(new RegExp(`^${key}=(.*)$`, 'm'));
-  return match ? match[1].trim() : undefined;
+  if (!match) {
+    return undefined;
+  }
+  return match[1].trim();
 }
 
 /** Rewrites a key in place, or appends it when the file predates the setting. */
 function setValue(contents, key, value) {
   const pattern = new RegExp(`^${key}=.*$`, 'm');
-  if (pattern.test(contents)) return contents.replace(pattern, `${key}=${value}`);
+  if (pattern.test(contents)) {
+    return contents.replace(pattern, `${key}=${value}`);
+  }
   return `${contents.replace(/\n*$/, '')}\n${key}=${value}\n`;
 }
 
@@ -175,8 +201,12 @@ const VALID_HOST =
   /^(?:\d{1,3}(?:\.\d{1,3}){3}|[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*)$/;
 
 function assertValidHost(value) {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 253) return false;
-  if (!VALID_HOST.test(value)) return false;
+  if (typeof value !== 'string' || value.length === 0 || value.length > 253) {
+    return false;
+  }
+  if (!VALID_HOST.test(value)) {
+    return false;
+  }
   // Reject 10.0.0.999 and friends, which pass the shape test.
   if (/^\d/.test(value) && value.includes('.') && /^\d{1,3}(\.\d{1,3}){3}$/.test(value)) {
     return value.split('.').every((octet) => Number(octet) <= 255);
@@ -188,10 +218,13 @@ function parseArgs(argv) {
   const args = { revert: false, address: undefined };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === '--revert') args.revert = true;
-    else if (arg === '--address') args.address = argv[(index += 1)];
-    else if (arg.startsWith('--address=')) args.address = arg.slice('--address='.length);
-    else {
+    if (arg === '--revert') {
+      args.revert = true;
+    } else if (arg === '--address') {
+      args.address = argv[(index += 1)];
+    } else if (arg.startsWith('--address=')) {
+      args.address = arg.slice('--address='.length);
+    } else {
       fail(`unknown argument: ${arg}`);
       process.exit(1);
     }
@@ -265,7 +298,9 @@ function startDevServer() {
   let stopping = false;
 
   const forward = (signal) => {
-    if (stopping) return;
+    if (stopping) {
+      return;
+    }
     stopping = true;
     stopDevServer(child, signal);
   };
@@ -277,7 +312,7 @@ function startDevServer() {
     process.exit(1);
   });
   // Let the child's exit drive ours, so nothing is left running behind us.
-  child.on('exit', (code, signal) => process.exit(signal ? 0 : (code ?? 1)));
+  child.on('exit', (code, signal) => process.exit(exitCodeFor(code, signal)));
 }
 
 async function main() {
@@ -294,10 +329,9 @@ async function main() {
   let contents = await readFile(envPath, 'utf8');
 
   // Plain-http LAN exposure is a development affordance. Refusing here keeps it
-  // from being mistaken for a deployment story; see docs/DEPLOYMENT.md.
+  // from being mistaken for a deployment story.
   if (readValue(contents, 'NODE_ENV') === 'production') {
     fail('NODE_ENV=production in .env. This script only configures development instances.');
-    warn('For a real internal deployment use docker-compose.yml with TLS. See docs/DEPLOYMENT.md.');
     process.exit(1);
   }
 
@@ -335,6 +369,11 @@ async function main() {
     }
   }
 
+  let minioBindAddress = '127.0.0.1';
+  if (onNetwork) {
+    minioBindAddress = '0.0.0.0';
+  }
+
   step('Updating .env');
   const updates = {
     TORAN_APP_URL: withHost(readValue(contents, 'TORAN_APP_URL'), target, '3000'),
@@ -346,17 +385,21 @@ async function main() {
     S3_PUBLIC_ENDPOINT: withHost(readValue(contents, 'S3_PUBLIC_ENDPOINT'), target, '9000'),
     // Only publish storage to the network when there is a network address to
     // share; a localhost-only instance keeps MinIO on loopback.
-    MINIO_BIND_ADDRESS: onNetwork ? '0.0.0.0' : '127.0.0.1',
+    MINIO_BIND_ADDRESS: minioBindAddress,
   };
 
   let changed = false;
   for (const [key, value] of Object.entries(updates)) {
-    if (readValue(contents, key) !== value) changed = true;
+    if (readValue(contents, key) !== value) {
+      changed = true;
+    }
     contents = setValue(contents, key, value);
     ok(`${key}=${value}`);
   }
   await writeFile(envPath, contents, 'utf8');
-  if (!changed) ok('already configured, nothing to change');
+  if (!changed) {
+    ok('already configured, nothing to change');
+  }
 
   step('Checking Docker');
   const docker = await run('docker', ['info', '--format', '{{.ServerVersion}}'], { quiet: true });
@@ -429,7 +472,27 @@ async function main() {
   startDevServer();
 }
 
+/**
+ * A child killed by a signal is our own shutdown, not a failure. Anything else
+ * carries the child's exit code so a broken dev session is visible to the
+ * caller rather than looking like a clean stop.
+ */
+function exitCodeFor(code, signal) {
+  if (signal) {
+    return 0;
+  }
+  return code ?? 1;
+}
+
+/** Message of whatever was thrown, without assuming it was an Error. */
+function messageOf(error) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
 main().catch((error) => {
-  fail(error instanceof Error ? error.message : String(error));
+  fail(messageOf(error));
   process.exit(1);
 });

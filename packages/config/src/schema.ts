@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { z } from 'zod';
 import {
   booleanFromEnv,
@@ -22,7 +21,6 @@ export const envSchema = z.object({
   TORAN_TRUSTED_PROXIES: csvFromEnv(),
   TORAN_SECRET_KEY: z.string().min(1, 'TORAN_SECRET_KEY is required'),
   TORAN_SECURE_COOKIES: booleanFromEnv(false),
-  TORAN_ABUSE_CONTACT_EMAIL: stringFromEnv('abuse@example.invalid'),
 
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   DATABASE_POOL_MAX: int(10, 1, 200),
@@ -53,8 +51,11 @@ export const envSchema = z.object({
   TORAN_RATE_LIMIT_UPLOAD_CREATE: rateLimitFromEnv('20/3600'),
   TORAN_RATE_LIMIT_UPLOAD_COMPLETE: rateLimitFromEnv('40/3600'),
   TORAN_RATE_LIMIT_DOWNLOAD: rateLimitFromEnv('120/3600'),
+  // The share page polls this endpoint every 3s while a file is scanning,
+  // which is 1200/hour on its own. Lower it and a visitor watching a slow
+  // scan rate-limits themselves.
+  TORAN_RATE_LIMIT_LOOKUP: rateLimitFromEnv('1200/3600'),
   TORAN_RATE_LIMIT_PASSWORD: rateLimitFromEnv('10/900'),
-  TORAN_RATE_LIMIT_REPORT: rateLimitFromEnv('5/3600'),
 
   TORAN_SCANNING_ENABLED: booleanFromEnv(true),
   CLAMAV_HOST: stringFromEnv('localhost'),

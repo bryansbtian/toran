@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   allowIntegrationSkip,
@@ -20,7 +19,10 @@ import {
 import { PostgresRateLimiter } from '../ratelimit.js';
 
 const reachable = allowIntegrationSkip(await isDatabaseReachable(), 'job-queue integration tests');
-const suite = reachable ? describe : describe.skip;
+let suite: typeof describe | typeof describe.skip = describe.skip;
+if (reachable) {
+  suite = describe;
+}
 
 let test$: TestDatabase;
 

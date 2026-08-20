@@ -1,6 +1,5 @@
-// SPDX-License-Identifier: MIT
 import { z } from 'zod';
-import { FILE_STATUSES, REPORT_REASONS } from './domain.js';
+import { FILE_STATUSES } from './domain.js';
 import { MAX_FILENAME_LENGTH } from './filenames.js';
 
 /** Every API id exposed to clients is a UUID; database ints are never leaked. */
@@ -192,18 +191,6 @@ export const downloadResponseSchema = z.object({
 });
 
 export type DownloadResponse = z.infer<typeof downloadResponseSchema>;
-
-export const createReportRequestSchema = z
-  .object({
-    /** Full share URL or a bare token. */
-    link: z.string().min(1).max(2048),
-    reason: z.enum(REPORT_REASONS),
-    details: z.string().max(4000).optional(),
-    contactEmail: z.string().email().max(320).optional(),
-  })
-  .strict();
-
-export type CreateReportRequest = z.infer<typeof createReportRequestSchema>;
 
 export const healthResponseSchema = z.object({
   status: z.literal('ok'),

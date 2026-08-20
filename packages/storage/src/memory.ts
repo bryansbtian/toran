@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { Readable } from 'node:stream';
 import { assertValidStorageKey, quarantineKeyFor } from './keys.js';
 import {
@@ -44,7 +43,9 @@ export class MemoryStorage implements StorageProvider {
 
   async createDownloadUrl(input: CreateDownloadUrlInput): Promise<string> {
     assertValidStorageKey(input.key);
-    if (!this.objects.has(input.key)) throw new StorageError('object not found', false);
+    if (!this.objects.has(input.key)) {
+      throw new StorageError('object not found', false);
+    }
     return `memory://download/${encodeURIComponent(input.key)}?filename=${encodeURIComponent(
       input.downloadFilename,
     )}`;
@@ -57,7 +58,9 @@ export class MemoryStorage implements StorageProvider {
       throw new StorageError('simulated storage failure', true);
     }
     const object = this.objects.get(key);
-    if (!object) return null;
+    if (!object) {
+      return null;
+    }
     return {
       key,
       size: object.body.byteLength,
@@ -70,7 +73,9 @@ export class MemoryStorage implements StorageProvider {
   async getObjectStream(key: string): Promise<NodeJS.ReadableStream> {
     assertValidStorageKey(key);
     const object = this.objects.get(key);
-    if (!object) throw new StorageError('object not found', false);
+    if (!object) {
+      throw new StorageError('object not found', false);
+    }
     return Readable.from([object.body]);
   }
 
@@ -83,12 +88,16 @@ export class MemoryStorage implements StorageProvider {
     assertValidStorageKey(sourceKey);
     assertValidStorageKey(destinationKey);
     const object = this.objects.get(sourceKey);
-    if (!object) throw new StorageError('object not found', false);
+    if (!object) {
+      throw new StorageError('object not found', false);
+    }
     this.objects.set(destinationKey, { ...object });
   }
 
   async healthCheck(): Promise<void> {
-    if (!this.healthy) throw new StorageError('memory storage marked unhealthy', true);
+    if (!this.healthy) {
+      throw new StorageError('memory storage marked unhealthy', true);
+    }
   }
 
   // --- test helpers -------------------------------------------------------
@@ -96,11 +105,11 @@ export class MemoryStorage implements StorageProvider {
   /** Stands in for the browser's direct PUT to object storage. */
   putObject(key: string, body: Buffer | string, contentType = 'application/octet-stream'): void {
     assertValidStorageKey(key);
-    this.objects.set(key, {
-      body: Buffer.isBuffer(body) ? body : Buffer.from(body),
-      contentType,
-      lastModified: new Date(),
-    });
+    let bytes = body;
+    if (!Buffer.isBuffer(bytes)) {
+      bytes = Buffer.from(bytes);
+    }
+    this.objects.set(key, { body: bytes, contentType, lastModified: new Date() });
   }
 
   has(key: string): boolean {

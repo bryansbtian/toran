@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: MIT
-
 export interface RateLimitRule {
   readonly max: number;
   readonly windowSeconds: number;
@@ -73,7 +71,9 @@ export class MemoryRateLimiter implements RateLimiter {
       };
     }
 
-    for (let index = 0; index < cost; index += 1) bucket.hits.push(timestamp);
+    for (let index = 0; index < cost; index += 1) {
+      bucket.hits.push(timestamp);
+    }
     this.buckets.set(key, bucket);
 
     return {
@@ -90,12 +90,16 @@ export class MemoryRateLimiter implements RateLimiter {
 
   /** Drops buckets whose newest hit is older than any plausible window. */
   private sweep(timestamp: number): void {
-    if (timestamp - this.lastSweep < 60_000) return;
+    if (timestamp - this.lastSweep < 60_000) {
+      return;
+    }
     this.lastSweep = timestamp;
     const horizon = timestamp - 24 * 3600 * 1000;
     for (const [key, bucket] of this.buckets) {
       const newest = bucket.hits[bucket.hits.length - 1] ?? 0;
-      if (newest < horizon) this.buckets.delete(key);
+      if (newest < horizon) {
+        this.buckets.delete(key);
+      }
     }
   }
 }

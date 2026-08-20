@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { ToranError, uuidSchema } from '@toran/shared';
 import { MANAGE_GRANT_HEADER, verifyGrant } from '@toran/security';
 import { findUploadSession } from '@toran/database';
@@ -20,10 +19,14 @@ export const DELETE = handler<{ id: string }>(
     assertSameOrigin(request, context);
 
     const uploadId = uuidSchema.safeParse(params.id);
-    if (!uploadId.success) throw new ToranError('NOT_FOUND');
+    if (!uploadId.success) {
+      throw new ToranError('NOT_FOUND');
+    }
 
     const session = await findUploadSession(context.db, uploadId.data);
-    if (!session) throw new ToranError('NOT_FOUND');
+    if (!session) {
+      throw new ToranError('NOT_FOUND');
+    }
 
     const grant = verifyGrant(request.headers.get(MANAGE_GRANT_HEADER), {
       purpose: 'manage',

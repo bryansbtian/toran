@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 /**
@@ -61,15 +60,21 @@ export function generateRequestId(random: RandomSource = systemRandom): string {
 export function extractShareToken(input: string): string | null {
   const trimmed = input.trim();
   const candidate = (() => {
-    if (!/^https?:\/\//i.test(trimmed)) return trimmed;
+    if (!/^https?:\/\//i.test(trimmed)) {
+      return trimmed;
+    }
     try {
+      // The last path segment either way: `/s/{token}` and a bare `/{token}`
+      // both put the token last. The shape test below is what actually decides
+      // whether the candidate is a token.
       const segments = new URL(trimmed).pathname.split('/').filter(Boolean);
-      return segments.length >= 2 && segments[segments.length - 2] === 's'
-        ? (segments[segments.length - 1] ?? '')
-        : (segments[segments.length - 1] ?? '');
+      return segments[segments.length - 1] ?? '';
     } catch {
       return '';
     }
   })();
-  return /^[A-Za-z0-9_-]{22,64}$/.test(candidate) ? candidate : null;
+  if (!/^[A-Za-z0-9_-]{22,64}$/.test(candidate)) {
+    return null;
+  }
+  return candidate;
 }

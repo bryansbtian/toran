@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 export * from './logger.js';
 export * from './redaction.js';
 export * from './telemetry.js';

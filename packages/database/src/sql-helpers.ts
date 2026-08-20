@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { sql, type SQL } from 'drizzle-orm';
 
 /**

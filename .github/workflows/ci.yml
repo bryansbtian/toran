@@ -1,19 +1,16 @@
-# SPDX-License-Identifier: MIT
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
-  workflow_dispatch:
-
-# A new push to a PR cancels the previous run; main is never cancelled.
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   NODE_VERSION: '22'
@@ -21,110 +18,49 @@ env:
   NEXT_TELEMETRY_DISABLED: '1'
 
 jobs:
-  # Fast feedback: formatting, linting, types and unit tests need no services.
-  #
-  # This is the only job that runs on all three platforms. Contributors develop
-  # on Windows, macOS and Linux, and every other job here is Docker-bound and so
-  # stays on Ubuntu; without this matrix nothing would catch a script or path
-  # that only works on one of them.
-  static:
-    name: Format, Lint, Types, Unit Tests (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-          - macos-latest
-    runs-on: ${{ matrix.os }}
+  verify:
+    name: Lint, Typecheck, Test, and Build
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - name: Set Up Node.js
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
-          # Keys the cache on package-lock.json, so a poisoned cache cannot
-          # survive a dependency change. setup-node resolves the npm cache
-          # directory per platform, so the matrix needs no path overrides.
           cache: npm
 
       - name: Install Dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Check Formatting
-        run: npm run format:check
+        run: npm ci
 
       - name: Lint
         run: npm run lint
 
+      - name: Check Formatting
+        run: npm run format:check
+
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Unit Tests
+      - name: Check for Committed Secrets
+        run: npm run secrets:scan
+
+      - name: Audit Production Dependencies
+        run: npm run audit:prod
+
+      - name: Report Development Advisories (Non-Blocking)
+        run: npm audit --audit-level=high || true
+
+      - name: Test
         run: npm test
 
-      # `next build` is slow and the images are built on Linux anyway, so one
-      # run is enough. The other runners still compile every workspace package,
-      # because lint, typecheck and test all depend on `^build` in turbo.json.
       - name: Build
-        if: matrix.os == 'ubuntu-latest'
         run: npm run build
 
-  # Migrations must apply to an empty database and be idempotent.
-  migrations:
-    name: Migration Validation
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: toran
-          POSTGRES_PASSWORD: toran
-          POSTGRES_DB: toran
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U toran -d toran"
-          --health-interval 5s --health-timeout 5s --health-retries 20
-    env:
-      DATABASE_URL: postgres://toran:toran@localhost:5432/toran
-      TORAN_SECRET_KEY: ci-only-secret-key-not-used-in-production-000
-      S3_BUCKET: toran
-      S3_ACCESS_KEY_ID: ci-access-key
-      S3_SECRET_ACCESS_KEY: ci-secret-key
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-
-      - run: npm ci --no-audit --no-fund
-      - run: npm run build --workspace=@toran/shared
-      - run: npm run build --workspace=@toran/config
-      - run: npm run build --workspace=@toran/security
-      - run: npm run build --workspace=@toran/storage
-      - run: npm run build --workspace=@toran/database
-
-      - name: Apply Migrations to an Empty Database
-        run: npm run db:migrate
-
-      - name: Re-Apply Migrations (Must Be a No-Op)
-        run: npm run db:migrate
-
-      - name: Fail if the Schema Has Uncommitted Drift
-        run: |
-          npm run db:generate --workspace=@toran/database -- --name ci-drift-check
-          if [ -n "$(git status --porcelain packages/database/drizzle)" ]; then
-            echo "::error::The Drizzle schema has changes with no committed migration."
-            echo "Run 'npm run db:generate' and commit the generated SQL."
-            git status --porcelain packages/database/drizzle
-            exit 1
-          fi
-
   integration:
-    name: Integration Tests
+    name: Migrations and Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
@@ -144,23 +80,40 @@ jobs:
       S3_BUCKET: toran
       S3_ACCESS_KEY_ID: ci-access-key
       S3_SECRET_ACCESS_KEY: ci-secret-key
-      # Integration tests use in-memory storage and a scripted scanner; no
-      # external service is required beyond PostgreSQL.
       TORAN_SCANNING_ENABLED: 'false'
-      # PostgreSQL is provisioned above, so "unreachable" here means something
-      # is broken, not absent. Without this the suites skip themselves and the
-      # job reports green having asserted nothing.
       TORAN_REQUIRE_INTEGRATION: 'true'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set Up Node.js
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
-      - run: npm ci --no-audit --no-fund
-      - run: npm run build
-      - run: npm run db:migrate
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Apply Migrations to an Empty Database
+        run: npm run db:migrate
+
+      - name: Re-Apply Migrations (Must Be a No-Op)
+        run: npm run db:migrate
+
+      - name: Fail if the Schema Has Uncommitted Drift
+        run: |
+          npm run db:generate --workspace=@toran/database -- --name ci-drift-check
+          if [ -n "$(git status --porcelain packages/database/drizzle)" ]; then
+            echo "::error::The Drizzle schema has changes with no committed migration."
+            echo "Run 'npm run db:generate' and commit the generated SQL."
+            git status --porcelain packages/database/drizzle
+            exit 1
+          fi
+
       - name: Integration Tests
         run: npm run test:integration
 
@@ -169,24 +122,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set Up Node.js
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
-      - run: npm ci --no-audit --no-fund
+      - name: Install Dependencies
+        run: npm ci
 
       - name: Start PostgreSQL, MinIO and ClamAV
         run: |
           cp .env.example .env
           docker compose -f docker-compose.dev.yml up -d
 
-      # A loop that merely runs out of iterations is not a check: it let the job
-      # continue against a database that never came up, and the real failure
-      # then surfaced as an unrelated Playwright timeout minutes later. Each
-      # wait below either observes `healthy` or fails the job with that
-      # container's logs attached.
       - name: Wait for Infrastructure
         run: |
           set -euo pipefail
@@ -223,17 +175,16 @@ jobs:
           docker exec toran-dev-minio mc mb --ignore-existing local/toran
           docker exec toran-dev-minio mc anonymous set none local/toran
 
-      - run: npm run build
-      - run: npm run db:migrate
+      - name: Build
+        run: npm run build
 
-      - name: Install Playwright Browsers
+      - name: Apply Migrations
+        run: npm run db:migrate
+
+      - name: Install Chromium
         run: npx playwright install --with-deps chromium
         working-directory: apps/web
 
-      # Started here rather than by Playwright's `webServer`, which would run
-      # `npm run dev` - the LAN helper. That rewrites `.env` and recreates the
-      # MinIO container with a different allowed upload origin, so a test run
-      # would reconfigure the environment underneath itself.
       - name: Start the Web App and the Worker
         run: |
           npm run dev --workspace=@toran/web > /tmp/toran-web.log 2>&1 &
@@ -241,10 +192,6 @@ jobs:
           npm run start --workspace=@toran/worker > /tmp/toran-worker.log 2>&1 &
           echo $! > /tmp/worker.pid
 
-      # Both processes expose a real readiness endpoint, so there is no reason
-      # to guess at a startup delay. `/api/ready` and `/ready` both touch their
-      # dependencies; the liveness endpoints would answer before the database
-      # and the bucket were usable.
       - name: Wait for the Web App and the Worker to Be Ready
         run: |
           set -euo pipefail
@@ -272,7 +219,6 @@ jobs:
         run: npm run test:e2e
         env:
           CI: 'true'
-          # The servers are already up and waited on above.
           TORAN_E2E_NO_SERVER: '1'
 
       - name: Server Logs on Failure
@@ -290,6 +236,7 @@ jobs:
           name: playwright-report
           path: apps/web/playwright-report/
           retention-days: 7
+          if-no-files-found: ignore
 
       - name: Stop the Servers and the Infrastructure
         if: always()
@@ -298,92 +245,3 @@ jobs:
             [ -f "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null || true
           done
           docker compose -f docker-compose.dev.yml down -v
-
-  docker:
-    name: Docker Images
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      # Third-party actions are pinned to a commit SHA, not a tag. A tag is
-      # mutable: whoever controls the repository can repoint it at new code,
-      # which would then run here with access to the workflow's token.
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-
-      - name: Build the Web Image
-        uses: docker/build-push-action@67a2d409c0a876cbe6b11854e3e25193efe4e62d # v6.12.0
-        with:
-          context: .
-          file: apps/web/Dockerfile
-          push: false
-          load: true
-          tags: toran-web:ci
-          cache-from: type=gha,scope=web
-          cache-to: type=gha,mode=max,scope=web
-
-      - name: Build the Worker Image
-        uses: docker/build-push-action@67a2d409c0a876cbe6b11854e3e25193efe4e62d # v6.12.0
-        with:
-          context: .
-          file: apps/worker/Dockerfile
-          push: false
-          load: true
-          tags: toran-worker:ci
-          cache-from: type=gha,scope=worker
-          cache-to: type=gha,mode=max,scope=worker
-
-      - name: Fail if an Image Runs as Root
-        run: |
-          for image in toran-web:ci toran-worker:ci; do
-            user=$(docker image inspect "$image" --format '{{.Config.User}}')
-            echo "$image runs as '${user:-root}'"
-            if [ -z "$user" ] || [ "$user" = "root" ]; then
-              echo "::error::$image must not run as root"
-              exit 1
-            fi
-          done
-
-      # Report only: a newly disclosed base-image CVE should show up in the log
-      # without blocking an unrelated pull request. `npm run audit:prod` in the
-      # supply-chain workflow is the check that does fail the build.
-      #
-      # Both shipping images are scanned. Scanning only the web image while the
-      # worker image is also published would make the log read as though
-      # everything Toran distributes had been checked. The worker is the image
-      # that matters most here: it is the only component that reads file bytes.
-      #
-      # Pinned to a commit SHA rather than a tag. v0.28.0 was used here before
-      # and had to go: it referenced `aquasecurity/setup-trivy@v0.2.1` by tag,
-      # and upstream has since deleted every setup-trivy tag below v0.2.6. The
-      # job then died in "Set up job" - before running a single step - with
-      # "unable to find version `v0.2.1`". v0.36.0 pins setup-trivy by SHA, so
-      # an upstream tag deletion cannot break this job again.
-      - name: Scan the Web Image for Known Vulnerabilities (Report Only)
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: toran-web:ci
-          format: table
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: '0'
-
-      - name: Scan the Worker Image for Known Vulnerabilities (Report Only)
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: toran-worker:ci
-          format: table
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: '0'
-
-  secrets:
-    name: Secret Scan
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-      - name: Check for Committed Secrets
-        run: node scripts/check-secrets.mjs

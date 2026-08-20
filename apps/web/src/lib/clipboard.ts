@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: MIT
-
 /**
  * Copies text to the clipboard, falling back when the async Clipboard API is
  * not available.
@@ -34,8 +32,12 @@ function copyBySelection(
   text: string,
   field: HTMLInputElement | HTMLTextAreaElement | null,
 ): boolean {
-  if (typeof document === 'undefined') return false;
-  if (field !== null) return copyFromField(field);
+  if (typeof document === 'undefined') {
+    return false;
+  }
+  if (field !== null) {
+    return copyFromField(field);
+  }
 
   // Nothing on screen holds the text, so borrow a field for one gesture. It has
   // to be laid out and focusable - `display: none` and `hidden` cannot be

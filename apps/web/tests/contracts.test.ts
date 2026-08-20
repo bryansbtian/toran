@@ -1,8 +1,6 @@
-// SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 import {
   authorizeShareRequestSchema,
-  createReportRequestSchema,
   createShareRequestSchema,
   createUploadRequestSchema,
   defaultMessageFor,
@@ -135,29 +133,6 @@ describe('authorizeShareRequestSchema', () => {
     expect(authorizeShareRequestSchema.safeParse({ password: 'x'.repeat(300) }).success).toBe(
       false,
     );
-  });
-});
-
-describe('createReportRequestSchema', () => {
-  it('accepts a full report', () => {
-    expect(
-      createReportRequestSchema.safeParse({
-        link: 'https://toran.example/s/abc',
-        reason: 'malware',
-        details: 'details here',
-        contactEmail: 'reporter@example.com',
-      }).success,
-    ).toBe(true);
-  });
-
-  it.each([
-    ['unknown reason', { link: 'x', reason: 'spam' }],
-    ['missing link', { reason: 'malware' }],
-    ['invalid email', { link: 'x', reason: 'malware', contactEmail: 'not-an-email' }],
-    ['overlong details', { link: 'x', reason: 'malware', details: 'x'.repeat(5000) }],
-    ['unknown field', { link: 'x', reason: 'malware', internalNote: 'x' }],
-  ])('rejects %s', (_name, input) => {
-    expect(createReportRequestSchema.safeParse(input).success).toBe(false);
   });
 });
 

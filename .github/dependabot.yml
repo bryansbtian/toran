@@ -1,61 +1,24 @@
-# SPDX-License-Identifier: MIT
 version: 2
-
 updates:
   - package-ecosystem: npm
-    directory: '/'
+    directory: /
     schedule:
       interval: weekly
       day: monday
-      time: '06:00'
-    open-pull-requests-limit: 8
-    labels: ['dependencies']
-    commit-message:
-      prefix: 'deps'
-      prefix-development: 'deps(dev)'
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
     groups:
-      # One PR per ecosystem cluster keeps review manageable and keeps
-      # co-versioned packages (AWS SDK, Next/React) moving together.
-      aws-sdk:
-        patterns: ['@aws-sdk/*']
-      next:
-        patterns:
-          [
-            'next',
-            'react',
-            'react-dom',
-            '@types/react',
-            '@types/react-dom',
-            'eslint-config-next',
-            '@next/*',
-          ]
-      drizzle:
-        patterns: ['drizzle-orm', 'drizzle-kit']
-      linting:
-        patterns: ['eslint', 'eslint-*', '@eslint/*', 'typescript-eslint', 'prettier', 'prettier-*']
-      testing:
-        patterns: ['vitest', '@vitest/*', '@playwright/*', 'playwright']
-    ignore:
-      # Node major upgrades are a deliberate decision, not a dependency bump.
-      - dependency-name: '@types/node'
-        update-types: ['version-update:semver-major']
+      development-dependencies:
+        dependency-type: development
+      production-dependencies:
+        dependency-type: production
 
   - package-ecosystem: github-actions
-    directory: '/'
+    directory: /
     schedule:
       interval: weekly
-    labels: ['dependencies', 'ci']
-    commit-message:
-      prefix: 'ci'
-
-  - package-ecosystem: docker
-    directory: '/apps/web'
-    schedule:
-      interval: weekly
-    labels: ['dependencies', 'docker']
-
-  - package-ecosystem: docker
-    directory: '/apps/worker'
-    schedule:
-      interval: weekly
-    labels: ['dependencies', 'docker']
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies

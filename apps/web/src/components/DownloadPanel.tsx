@@ -1,11 +1,17 @@
-// SPDX-License-Identifier: MIT
 'use client';
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { formatAbsolute, formatBytes, type PublicShare } from '@toran/shared';
 import { Alert, Badge, Button, Card, Field, inputClassName, Spinner } from '@toran/ui';
-import { ApiError, authorizeShare, fetchShare, requestDownload } from '@/lib/api';
+import { apiErrorMessage, authorizeShare, fetchShare, requestDownload } from '@/lib/api';
+
+function plural(word: string, count: number): string {
+  if (count === 1) {
+    return word;
+  }
+  return `${word}s`;
+}
 
 export function DownloadPanel({ token }: { readonly token: string }) {
   const passwordId = useId();
@@ -25,7 +31,7 @@ export function DownloadPanel({ token }: { readonly token: string }) {
       const next = await fetchShare(token);
       setShare(next);
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'This link could not be loaded.');
+      setError(apiErrorMessage(caught, 'This link could not be loaded.'));
     } finally {
       setLoading(false);
     }
@@ -44,10 +50,14 @@ export function DownloadPanel({ token }: { readonly token: string }) {
     (share?.files.some((file) => file.status === 'scanning') ?? false);
 
   useEffect(() => {
-    if (!scanning) return;
+    if (!scanning) {
+      return;
+    }
     pollRef.current = window.setInterval(() => void load(), 3000);
     return () => {
-      if (pollRef.current !== null) window.clearInterval(pollRef.current);
+      if (pollRef.current !== null) {
+        window.clearInterval(pollRef.current);
+      }
     };
   }, [scanning, load]);
 
@@ -59,9 +69,7 @@ export function DownloadPanel({ token }: { readonly token: string }) {
       setPassword('');
       await load();
     } catch (caught) {
-      setPasswordError(
-        caught instanceof ApiError ? caught.message : 'That password could not be checked.',
-      );
+      setPasswordError(apiErrorMessage(caught, 'That password could not be checked.'));
     } finally {
       setWorking(false);
     }
@@ -78,7 +86,7 @@ export function DownloadPanel({ token }: { readonly token: string }) {
       window.location.href = result.url;
       await load();
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'The download could not start.');
+      setError(apiErrorMessage(caught, 'The download could not start.'));
       await load();
     } finally {
       setBusyFileId(null);
@@ -100,7 +108,7 @@ export function DownloadPanel({ token }: { readonly token: string }) {
     return (
       <Card>
         <h1 className="text-2xl font-semibold tracking-tight text-ink">
-          This link isn&apos;t available
+          This Link Isn&apos;t Available
         </h1>
         <p className="mt-3 text-sm text-ink-muted">
           The link may have expired, reached its download limit, been revoked by the person who
@@ -111,13 +119,7 @@ export function DownloadPanel({ token }: { readonly token: string }) {
             href="/"
             className="inline-flex items-center rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700"
           >
-            Share your own file
-          </Link>
-          <Link
-            href="/report"
-            className="inline-flex items-center rounded-lg border border-line px-4 py-2.5 text-sm font-medium text-ink hover:bg-surface-sunken"
-          >
-            Report this link
+            Share Your Own File
           </Link>
         </div>
       </Card>
@@ -125,17 +127,22 @@ export function DownloadPanel({ token }: { readonly token: string }) {
   }
 
   if (share.status === 'scanning') {
+    let scanningHeading = 'Scanning This File';
+    let scanningDetail = '';
+    if (share.files.length > 1) {
+      scanningHeading = 'Scanning These Files';
+      scanningDetail = ', file by file';
+    }
+
     return (
       <Card>
         <div className="flex items-center gap-3">
           <Spinner />
           <div>
-            <h1 className="text-xl font-semibold text-ink">
-              {share.files.length > 1 ? 'Scanning these files' : 'Scanning this file'}
-            </h1>
+            <h1 className="text-xl font-semibold text-ink">{scanningHeading}</h1>
             <p className="mt-1 text-sm text-ink-muted">
               Toran checks every upload for malware before it can be downloaded. This page updates
-              automatically{share.files.length > 1 ? ', file by file' : ''}.
+              automatically{scanningDetail}.
             </p>
           </div>
         </div>
@@ -144,9 +151,16 @@ export function DownloadPanel({ token }: { readonly token: string }) {
   }
 
   if (share.passwordProtected && !share.authorized) {
+    // Passed as an absent key rather than `error: undefined`, so `Field` does
+    // not render an empty alert region before the first failed attempt.
+    const fieldError: { error?: string } = {};
+    if (passwordError) {
+      fieldError.error = passwordError;
+    }
+
     return (
       <Card>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Password required</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">Password Required</h1>
         <p className="mt-2 text-sm text-ink-muted">
           The person who shared this file protected it with a password.
         </p>
@@ -157,11 +171,7 @@ export function DownloadPanel({ token }: { readonly token: string }) {
             void authorize();
           }}
         >
-          <Field
-            label="Password"
-            htmlFor={passwordId}
-            {...(passwordError ? { error: passwordError } : {})}
-          >
+          <Field label="Password" htmlFor={passwordId} {...fieldError}>
             <input
               id={passwordId}
               type="password"
@@ -186,19 +196,35 @@ export function DownloadPanel({ token }: { readonly token: string }) {
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
   const single = files[0];
 
+  let expiresLabel = 'Never';
+  if (share.expiresAt) {
+    expiresLabel = formatAbsolute(new Date(share.expiresAt));
+  }
+
+  // A single-file link is titled by its filename, which can overflow and so
+  // carries a tooltip. A count never overflows and needs none.
+  let heading = single?.filename ?? '';
+  let headingTitle: string | undefined = single?.filename;
+  let sizeSuffix = '';
+  if (many) {
+    heading = `${files.length} Files`;
+    headingTitle = undefined;
+    sizeSuffix = ' total';
+  }
+
   return (
     <Card>
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h1
             className="truncate text-2xl font-semibold tracking-tight text-ink"
-            title={many ? undefined : single?.filename}
+            title={headingTitle}
           >
-            {many ? `${files.length} files` : (single?.filename ?? '')}
+            {heading}
           </h1>
           <p className="mt-2 text-sm text-ink-muted">
             {formatBytes(totalBytes)}
-            {many ? ' total · pick the ones you want' : ''}
+            {sizeSuffix}
           </p>
         </div>
         <Badge tone="success">Ready</Badge>
@@ -216,16 +242,15 @@ export function DownloadPanel({ token }: { readonly token: string }) {
               </p>
               <p className="text-xs text-ink-muted">
                 {formatBytes(file.size)}
-                {file.remainingDownloads !== null ? (
+                {file.remainingDownloads !== null && (
                   <span data-testid="remaining-downloads">
                     {' · '}
-                    {file.remainingDownloads} download
-                    {file.remainingDownloads === 1 ? '' : 's'} left
+                    {file.remainingDownloads} {plural('download', file.remainingDownloads)} left
                   </span>
-                ) : null}
+                )}
               </p>
             </div>
-            {file.status === 'ready' ? (
+            {file.status === 'ready' && (
               <Button
                 onClick={() => void download(file.fileId)}
                 loading={busyFileId === file.fileId}
@@ -235,12 +260,14 @@ export function DownloadPanel({ token }: { readonly token: string }) {
                 Download
                 <span className="sr-only"> {file.filename}</span>
               </Button>
-            ) : file.status === 'scanning' ? (
-              <Badge tone="warning">Scanning…</Badge>
-            ) : (
-              // Exhausted, blocked, expired or deleted all present the same way:
-              // the link already reveals that the file exists, and nothing more
-              // is owed to a visitor holding only the token.
+            )}
+            {file.status === 'scanning' && <Badge tone="warning">Scanning…</Badge>}
+            {/*
+              Exhausted, blocked, expired or deleted all present the same way:
+              the link already reveals that the file exists, and nothing more is
+              owed to a visitor holding only the token.
+            */}
+            {file.status !== 'ready' && file.status !== 'scanning' && (
               <Badge tone="danger">Unavailable</Badge>
             )}
           </li>
@@ -250,36 +277,25 @@ export function DownloadPanel({ token }: { readonly token: string }) {
       <dl className="mt-6 grid grid-cols-1 gap-4 border-t border-line pt-6 sm:grid-cols-2">
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-ink-subtle">Expires</dt>
-          <dd className="mt-1 text-sm text-ink">
-            {share.expiresAt ? formatAbsolute(new Date(share.expiresAt)) : 'Never'}
-          </dd>
+          <dd className="mt-1 text-sm text-ink">{expiresLabel}</dd>
         </div>
       </dl>
 
-      {error ? (
+      {error && (
         <div className="mt-6">
-          <Alert title="Download failed">{error}</Alert>
+          <Alert title="Download Failed">{error}</Alert>
         </div>
-      ) : null}
+      )}
 
-      {downloaded && !error ? (
+      {downloaded && !error && (
         <div className="mt-6">
           <Alert tone="success">
             Your download has started. If nothing happened, use the button again.
           </Alert>
         </div>
-      ) : null}
+      )}
 
-      <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-line pt-6">
-        <Link
-          href="/report"
-          className="text-xs font-medium text-ink-muted underline underline-offset-2 hover:text-ink"
-        >
-          Report this file
-        </Link>
-      </div>
-
-      <p className="mt-4 text-xs text-ink-subtle">
+      <p className="mt-6 border-t border-line pt-6 text-xs text-ink-subtle">
         Toran scans uploads for known malware, but no scanner catches everything. Only open files
         from people you trust.
       </p>

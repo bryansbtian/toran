@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: MIT
 
 /**
  * Fails when a production dependency carries a high or critical advisory that
@@ -30,8 +29,12 @@ import path from 'node:path';
  */
 function npmCommand(args) {
   const npmCli = process.env.npm_execpath;
-  if (npmCli) return [process.execPath, [npmCli, ...args]];
-  if (process.platform !== 'win32') return ['npm', args];
+  if (npmCli) {
+    return [process.execPath, [npmCli, ...args]];
+  }
+  if (process.platform !== 'win32') {
+    return ['npm', args];
+  }
   const bundled = path.join(
     path.dirname(process.execPath),
     'node_modules',
@@ -106,7 +109,9 @@ function advisoryIdsFor(vulnerability) {
   for (const via of vulnerability.via ?? []) {
     if (typeof via === 'object' && typeof via.url === 'string') {
       const match = /GHSA-[a-z0-9-]+/i.exec(via.url);
-      if (match) ids.add(match[0]);
+      if (match) {
+        ids.add(match[0]);
+      }
     }
   }
   return ids;
@@ -116,7 +121,9 @@ async function main() {
   const { stdout, stderr } = await runAudit();
   if (stdout.trim() === '') {
     console.error('[toran] npm audit produced no output.');
-    if (stderr) console.error(stderr);
+    if (stderr) {
+      console.error(stderr);
+    }
     return 1;
   }
 
@@ -132,13 +139,17 @@ async function main() {
   const accepted = [];
 
   for (const [name, vulnerability] of Object.entries(report.vulnerabilities ?? {})) {
-    if (!['high', 'critical'].includes(vulnerability.severity)) continue;
+    if (!['high', 'critical'].includes(vulnerability.severity)) {
+      continue;
+    }
 
     const ids = advisoryIdsFor(vulnerability);
 
     // A package flagged purely because a dependency of it is flagged carries no
     // advisory of its own; judging it separately would double-count.
-    if (ids.size === 0 && TRANSITIVE_ONLY.has(name)) continue;
+    if (ids.size === 0 && TRANSITIVE_ONLY.has(name)) {
+      continue;
+    }
 
     if (ids.size === 0) {
       unreviewed.push({ name, detail: `${vulnerability.severity} advisory with no GHSA id` });
@@ -146,8 +157,11 @@ async function main() {
     }
 
     for (const id of ids) {
-      if (ACCEPTED[id]) accepted.push({ id, name });
-      else unreviewed.push({ name, detail: `${vulnerability.severity} ${id}` });
+      if (ACCEPTED[id]) {
+        accepted.push({ id, name });
+      } else {
+        unreviewed.push({ name, detail: `${vulnerability.severity} ${id}` });
+      }
     }
   }
 

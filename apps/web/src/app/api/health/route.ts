@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
@@ -16,7 +15,7 @@ export function GET(): Response {
     JSON.stringify({
       status: 'ok',
       service: 'toran-web',
-      version: process.env.TORAN_VERSION ?? '0.1.0',
+      version: process.env.TORAN_VERSION ?? '1.0.0',
       uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
     }),
     {

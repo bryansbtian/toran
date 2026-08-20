@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: MIT
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { eq } from 'drizzle-orm';
@@ -10,19 +9,17 @@ import {
   findJobById,
   findShareByTokenHash,
   listFailedJobs,
-  listOpenReports,
   listSharesForFile,
   markFileStatus,
   retryJob,
   revokeAllSharesForFile,
   revokeShareLink,
-  setReportStatus,
   countJobsByStatus,
 } from '@toran/database';
 import { loadConfig } from '@toran/config';
 import { extractShareToken, hashShareToken } from '@toran/security';
 import { quarantineKeyFor } from '@toran/storage';
-import { formatBytes } from '@toran/shared';
+import { errorMessage, formatBytes } from '@toran/shared';
 import { createWorkerRuntime } from '../context.js';
 import { cleanupJobs } from '../jobs/cleanup.js';
 import { scanFileJob } from '../jobs/scanFile.js';
@@ -38,7 +35,6 @@ Usage:
 Inspect:
   file <file-id>                 Show a file, its links and its scan result
   link <token-or-url>            Resolve a share link from a raw token
-  reports [--limit N]            List open abuse reports
   jobs [--failed] [--limit N]    List queue state or failed jobs
 
 Act (destructive commands require confirmation):
@@ -48,7 +44,6 @@ Act (destructive commands require confirmation):
   rescan <file-id>               Queue a fresh malware scan
   retry-job <job-id>             Return a dead job to the queue
   cleanup                        Run every maintenance sweep once, now
-  report-status <id> <status>    Set an abuse report to open|actioned|dismissed
 
 Options:
   --yes, -y                      Skip the confirmation prompt (for automation)
@@ -78,28 +73,49 @@ function parseArgs(argv: string[]): Args {
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index] ?? '';
-    if (arg === '--yes' || arg === '-y') yes = true;
-    else if (arg === '--failed') failed = true;
-    else if (arg === '--help' || arg === '-h') help = true;
-    else if (arg === '--limit') {
+    if (arg === '--yes' || arg === '-y') {
+      yes = true;
+    } else if (arg === '--failed') {
+      failed = true;
+    } else if (arg === '--help' || arg === '-h') {
+      help = true;
+    } else if (arg === '--limit') {
       limit = Number(argv[index + 1] ?? '25');
       index += 1;
-    } else positional.push(arg);
+    } else {
+      positional.push(arg);
+    }
+  }
+
+  // A missing or nonsensical --limit falls back to the default rather than
+  // failing the command; 500 is the ceiling so one call cannot page everything.
+  let resolvedLimit = 25;
+  if (Number.isInteger(limit) && limit > 0) {
+    resolvedLimit = Math.min(limit, 500);
   }
 
   return {
     command: positional[0] ?? '',
     positional: positional.slice(1),
     yes,
-    limit: Number.isInteger(limit) && limit > 0 ? Math.min(limit, 500) : 25,
+    limit: resolvedLimit,
     failed,
     help,
   };
 }
 
+function yesNo(value: boolean): string {
+  if (value) {
+    return 'yes';
+  }
+  return 'no';
+}
+
 /** Destructive operations must be confirmed unless explicitly automated. */
 async function confirm(args: Args, action: string): Promise<boolean> {
-  if (args.yes) return true;
+  if (args.yes) {
+    return true;
+  }
   if (!stdin.isTTY) {
     console.error(`Refusing to ${action} without a terminal. Pass --yes for automation.`);
     return false;
@@ -130,8 +146,6 @@ async function main(): Promise<number> {
         return await showFile(runtime, args);
       case 'link':
         return await showLink(runtime, args);
-      case 'reports':
-        return await showReports(runtime, args);
       case 'jobs':
         return await showJobs(runtime, args);
       case 'revoke-link':
@@ -146,8 +160,6 @@ async function main(): Promise<number> {
         return await doRetryJob(runtime, args);
       case 'cleanup':
         return await doCleanup(runtime, args);
-      case 'report-status':
-        return await doReportStatus(runtime, args);
       default:
         console.error(`Unknown command "${args.command}". Run with --help.`);
         return 1;
@@ -178,9 +190,11 @@ async function showFile(runtime: Runtime, args: Args): Promise<number> {
   console.log(`filename            ${file.normalizedFilename}`);
   console.log(`content type        ${file.contentType}`);
   console.log(`declared size       ${formatBytes(file.declaredSize)}`);
-  console.log(
-    `actual size         ${file.actualSize === null ? '(not verified)' : formatBytes(file.actualSize)}`,
-  );
+  let actualSize = '(not verified)';
+  if (file.actualSize !== null) {
+    actualSize = formatBytes(file.actualSize);
+  }
+  console.log(`actual size         ${actualSize}`);
   console.log(`scan result         ${file.scanResult ?? '(none)'}`);
   console.log(`storage key         ${file.storageKey}`);
   console.log(`created             ${file.createdAt.toISOString()}`);
@@ -190,9 +204,9 @@ async function showFile(runtime: Runtime, args: Args): Promise<number> {
   for (const share of shares) {
     console.log(
       `  ${share.id}  limit=${share.maxDownloads ?? '∞'}/file  ` +
-        `password=${share.passwordHash ? 'yes' : 'no'}  ` +
+        `password=${yesNo(share.passwordHash !== null)}  ` +
         `expires=${share.expiresAt?.toISOString() ?? 'never'}  ` +
-        `revoked=${share.revokedAt ? share.revokedAt.toISOString() : 'no'}`,
+        `revoked=${share.revokedAt?.toISOString() ?? 'no'}`,
     );
   }
   return 0;
@@ -227,25 +241,9 @@ async function showLink(runtime: Runtime, args: Args): Promise<number> {
         `${file.status}  ${file.normalizedFilename}`,
     );
   }
-  console.log(`password protected  ${found.share.passwordHash ? 'yes' : 'no'}`);
+  console.log(`password protected  ${yesNo(found.share.passwordHash !== null)}`);
   console.log(`expires             ${found.share.expiresAt?.toISOString() ?? '(never)'}`);
   console.log(`revoked             ${found.share.revokedAt?.toISOString() ?? '(no)'}`);
-  return 0;
-}
-
-async function showReports(runtime: Runtime, args: Args): Promise<number> {
-  const reports = await listOpenReports(runtime.context.db, args.limit);
-  if (reports.length === 0) {
-    console.log('No open reports.');
-    return 0;
-  }
-  for (const report of reports) {
-    console.log(
-      `${report.createdAt.toISOString()}  ${report.id}  ${report.reason.padEnd(11)}  ` +
-        `share=${report.shareLinkId ?? '(unresolved)'}`,
-    );
-    if (report.details) console.log(`    ${report.details.slice(0, 200)}`);
-  }
   return 0;
 }
 
@@ -261,7 +259,9 @@ async function showJobs(runtime: Runtime, args: Args): Promise<number> {
         `${job.id}  ${job.type.padEnd(22)}  attempts=${job.attempts}/${job.maxAttempts}  ` +
           `status=${job.status}`,
       );
-      if (job.lastError) console.log(`    ${job.lastError}`);
+      if (job.lastError) {
+        console.log(`    ${job.lastError}`);
+      }
     }
     return 0;
   }
@@ -280,7 +280,9 @@ async function doRevokeLink(runtime: Runtime, args: Args): Promise<number> {
     console.error('Usage: toran-admin revoke-link <share-id>');
     return 1;
   }
-  if (!(await confirm(args, `revoke share link ${shareId}`))) return 1;
+  if (!(await confirm(args, `revoke share link ${shareId}`))) {
+    return 1;
+  }
 
   const revoked = await revokeShareLink(runtime.context.db, shareId, runtime.context.clock.now());
   if (!revoked) {
@@ -297,7 +299,9 @@ async function doBlockFile(runtime: Runtime, args: Args): Promise<number> {
     console.error('Usage: toran-admin block-file <file-id>');
     return 1;
   }
-  if (!(await confirm(args, `block file ${fileId} and revoke every link to it`))) return 1;
+  if (!(await confirm(args, `block file ${fileId} and revoke every link to it`))) {
+    return 1;
+  }
 
   const now = runtime.context.clock.now();
   const file = await markFileStatus(runtime.context.db, { fileId, status: 'blocked', now });
@@ -333,7 +337,9 @@ async function doDeleteFile(runtime: Runtime, args: Args): Promise<number> {
     console.error('No file with that id.');
     return 1;
   }
-  if (!(await confirm(args, `permanently delete file ${fileId} and its storage object`))) return 1;
+  if (!(await confirm(args, `permanently delete file ${fileId} and its storage object`))) {
+    return 1;
+  }
 
   const now = runtime.context.clock.now();
   await revokeAllSharesForFile(runtime.context.db, fileId, now);
@@ -398,7 +404,9 @@ async function doRetryJob(runtime: Runtime, args: Args): Promise<number> {
 }
 
 async function doCleanup(runtime: Runtime, args: Args): Promise<number> {
-  if (!(await confirm(args, 'run every maintenance sweep now'))) return 1;
+  if (!(await confirm(args, 'run every maintenance sweep now'))) {
+    return 1;
+  }
 
   const scheduler = new MaintenanceScheduler(runtime.context);
   await scheduler.enqueueDue();
@@ -416,33 +424,17 @@ async function doCleanup(runtime: Runtime, args: Args): Promise<number> {
   for (let round = 0; round < 25; round += 1) {
     const stats = await runner.tick();
     total += stats.succeeded + stats.failed + stats.retried;
-    if (stats.claimed === 0) break;
+    if (stats.claimed === 0) {
+      break;
+    }
   }
   console.log(`Processed ${total} job(s).`);
-  return 0;
-}
-
-async function doReportStatus(runtime: Runtime, args: Args): Promise<number> {
-  const [reportId, status] = args.positional;
-  if (!reportId || !status || !['open', 'actioned', 'dismissed'].includes(status)) {
-    console.error('Usage: toran-admin report-status <report-id> <open|actioned|dismissed>');
-    return 1;
-  }
-  const updated = await setReportStatus(runtime.context.db, {
-    reportId,
-    status: status as 'open' | 'actioned' | 'dismissed',
-  });
-  if (!updated) {
-    console.error('No report with that id.');
-    return 1;
-  }
-  console.log(`Report ${updated.id} is now "${updated.status}".`);
   return 0;
 }
 
 main()
   .then((code) => process.exit(code))
   .catch((error: unknown) => {
-    console.error('[toran-admin]', error instanceof Error ? error.message : 'unknown error');
+    console.error('[toran-admin]', errorMessage(error));
     process.exit(1);
   });

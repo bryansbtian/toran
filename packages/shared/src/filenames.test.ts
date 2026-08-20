@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 import {
   contentDispositionAttachment,
@@ -11,7 +10,9 @@ import {
 
 const normalized = (input: string): string => {
   const result = normalizeFilename(input);
-  if (!result.ok) throw new Error(`expected ok, got ${result.reason}`);
+  if (!result.ok) {
+    throw new Error(`expected ok, got ${result.reason}`);
+  }
   return result.normalized;
 };
 
@@ -80,7 +81,9 @@ describe('normalizeFilename', () => {
   it('is idempotent', () => {
     for (const input of ['../a/b.txt', 'a"b.txt', '.env', 'report.pdf...']) {
       const once = normalizeFilename(input);
-      if (!once.ok) continue;
+      if (!once.ok) {
+        continue;
+      }
       expect(normalizeFilename(once.normalized)).toEqual({ ok: true, normalized: once.normalized });
     }
   });

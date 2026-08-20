@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: MIT
 
 /**
  * One-command development bootstrap.
@@ -34,8 +33,12 @@ const fail = (message) => console.error(`    ✗ ${message}`);
  */
 function npmCommand(args) {
   const npmCli = process.env.npm_execpath;
-  if (npmCli) return [process.execPath, [npmCli, ...args]];
-  if (process.platform !== 'win32') return ['npm', args];
+  if (npmCli) {
+    return [process.execPath, [npmCli, ...args]];
+  }
+  if (process.platform !== 'win32') {
+    return ['npm', args];
+  }
   const bundled = path.join(
     path.dirname(process.execPath),
     'node_modules',
@@ -54,11 +57,19 @@ function npmCommand(args) {
  * mangle quoting.
  */
 function run(command, args, options = {}) {
+  /** Capturing output means piping it; otherwise the child shares this terminal. */
+  function stdioFor(quiet) {
+    if (quiet) {
+      return ['ignore', 'pipe', 'pipe'];
+    }
+    return 'inherit';
+  }
+
   const { quiet, ...rest } = options;
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd: root,
-      stdio: quiet ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+      stdio: stdioFor(quiet),
       shell: false,
       ...rest,
     });
@@ -73,14 +84,20 @@ function run(command, args, options = {}) {
 
 async function readEnv() {
   const envPath = path.join(root, '.env');
-  if (!existsSync(envPath)) return {};
+  if (!existsSync(envPath)) {
+    return {};
+  }
   const contents = await readFile(envPath, 'utf8');
   const values = {};
   for (const line of contents.split('\n')) {
     const trimmed = line.trim();
-    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    if (trimmed === '' || trimmed.startsWith('#')) {
+      continue;
+    }
     const separator = trimmed.indexOf('=');
-    if (separator < 0) continue;
+    if (separator < 0) {
+      continue;
+    }
     values[trimmed.slice(0, separator).trim()] = trimmed
       .slice(separator + 1)
       .trim()
@@ -131,7 +148,9 @@ let progressWidth = 0;
  * not a cursor movement, it is just another character in the file.
  */
 function progress(message) {
-  if (!process.stdout.isTTY) return;
+  if (!process.stdout.isTTY) {
+    return;
+  }
   // Pad to the previous width. A bare `\r` only moves the cursor, so a shorter
   // line would otherwise leave the tail of a longer one on screen.
   process.stdout.write(`${message.padEnd(progressWidth)}\r`);
@@ -140,7 +159,9 @@ function progress(message) {
 
 /** Erases whatever `progress` last drew, leaving the cursor at column zero. */
 function clearProgress() {
-  if (progressWidth === 0) return;
+  if (progressWidth === 0) {
+    return;
+  }
   process.stdout.write(`${''.padEnd(progressWidth)}\r`);
   progressWidth = 0;
 }
@@ -269,10 +290,14 @@ async function main() {
     warn('Watch it with: docker logs -f toran-dev-clamav');
   }
 
-  if (!(await ensureBucket(env))) process.exit(1);
+  if (!(await ensureBucket(env))) {
+    process.exit(1);
+  }
   await configureBucketCors(env);
   await buildPackages();
-  if (!(await runMigrations())) process.exit(1);
+  if (!(await runMigrations())) {
+    process.exit(1);
+  }
 
   console.log('\nToran is ready. Start it with:\n');
   console.log('    npm run dev\n');
@@ -282,7 +307,15 @@ async function main() {
   console.log('MinIO console: http://localhost:9001\n');
 }
 
+/** Message of whatever was thrown, without assuming it was an Error. */
+function messageOf(error) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
 main().catch((error) => {
-  fail(error instanceof Error ? error.message : String(error));
+  fail(messageOf(error));
   process.exit(1);
 });

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { expect, type Page } from '@playwright/test';
 
 export interface UploadOptions {
@@ -45,7 +44,7 @@ export async function uploadFiles(
   // Nothing is selected yet, so the panel is always in its singular form here.
   // The plural heading is asserted below, after the files are chosen - checking
   // for it now would only ever find the singular one.
-  await expect(page.getByRole('heading', { name: 'Share a file' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Share a File' })).toBeVisible();
 
   await page.locator('input[type="file"]').setInputFiles(
     entries.map((entry) => ({
@@ -59,28 +58,28 @@ export async function uploadFiles(
   }
   // Selecting several files switches the panel to its plural form.
   if (entries.length > 1) {
-    await expect(page.getByRole('heading', { name: 'Share files' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Share Files' })).toBeVisible();
   }
 
   if (options.expiryLabel) {
-    await page.getByLabel('Link expires after').selectOption({ label: options.expiryLabel });
+    await page.getByLabel('Link Expires After').selectOption({ label: options.expiryLabel });
   }
 
   if (options.password) {
-    await page.getByLabel('Require a password').check();
+    await page.getByLabel('Require a Password').check();
     await page.getByLabel('Password', { exact: true }).fill(options.password);
   }
 
   if (options.maxDownloads !== undefined) {
-    await page.getByLabel('Limit the number of downloads').check();
-    await page.getByLabel('Maximum downloads').fill(String(options.maxDownloads));
+    await page.getByLabel('Limit the Number of Downloads').check();
+    await page.getByLabel('Maximum Downloads').fill(String(options.maxDownloads));
   }
 
-  await page.getByRole('button', { name: 'Create share link' }).click();
+  await page.getByRole('button', { name: 'Create Share Link' }).click();
 
   // The link appears only after the browser has PUT the bytes to storage and
   // Toran has verified the stored object.
-  await expect(page.getByRole('heading', { name: 'Your link is ready' })).toBeVisible({
+  await expect(page.getByRole('heading', { name: 'Your Link Is Ready' })).toBeVisible({
     timeout: 60_000,
   });
 

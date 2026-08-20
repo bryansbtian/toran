@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { authorizeShareRequestSchema, shareTokenSchema, ToranError } from '@toran/shared';
 import { assertSameOrigin, handler, json, readJson } from '@/server/http';
 import { authorizeShare } from '@/server/downloads';

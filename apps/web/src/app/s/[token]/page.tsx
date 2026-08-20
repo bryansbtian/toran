@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import type { Metadata } from 'next';
 import { DownloadPanel } from '@/components/DownloadPanel';
 
@@ -22,8 +21,8 @@ export const metadata: Metadata = {
  * of what this component does with `params`. That is acceptable because the
  * response is `Cache-Control: no-store` (see `middleware.ts`) and is only ever
  * sent to a client that already supplied the token - but it is not the same as
- * the token being absent. docs/THREAT_MODEL.md section 4 records the gap and
- * the fragment-based fix.
+ * the token being absent. Closing it properly means moving the token into the
+ * URL fragment, which never reaches the server at all.
  */
 export default async function SharePage({
   params,
@@ -31,5 +30,9 @@ export default async function SharePage({
   readonly params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
-  return <DownloadPanel token={token} />;
+  return (
+    <div className="mx-auto w-full max-w-4xl">
+      <DownloadPanel token={token} />
+    </div>
+  );
 }

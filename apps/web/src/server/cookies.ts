@@ -1,15 +1,20 @@
-// SPDX-License-Identifier: MIT
 import 'server-only';
 import type { ToranConfig } from '@toran/config';
 
 /** Reads one cookie without pulling in a parser dependency. */
 export function readCookie(request: Request, name: string): string | null {
   const header = request.headers.get('cookie');
-  if (!header) return null;
+  if (!header) {
+    return null;
+  }
   for (const part of header.split(';')) {
     const separator = part.indexOf('=');
-    if (separator < 0) continue;
-    if (part.slice(0, separator).trim() !== name) continue;
+    if (separator < 0) {
+      continue;
+    }
+    if (part.slice(0, separator).trim() !== name) {
+      continue;
+    }
     return decodeURIComponent(part.slice(separator + 1).trim());
   }
   return null;
@@ -41,12 +46,16 @@ export function buildGrantCookie(
     'SameSite=Strict',
     `Max-Age=${input.maxAgeSeconds}`,
   ];
-  if (config.app.secureCookies) attributes.push('Secure');
+  if (config.app.secureCookies) {
+    attributes.push('Secure');
+  }
   return attributes.join('; ');
 }
 
 export function clearGrantCookie(config: ToranConfig, name: string): string {
   const attributes = [`${name}=`, 'Path=/', 'HttpOnly', 'SameSite=Strict', 'Max-Age=0'];
-  if (config.app.secureCookies) attributes.push('Secure');
+  if (config.app.secureCookies) {
+    attributes.push('Secure');
+  }
   return attributes.join('; ');
 }

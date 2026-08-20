@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { pino, type Logger as PinoLogger } from 'pino';
 import { redact } from './redaction.js';
 

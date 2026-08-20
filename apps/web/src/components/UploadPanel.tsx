@@ -1,11 +1,19 @@
-// SPDX-License-Identifier: MIT
 'use client';
 
-import { useCallback, useId, useMemo, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type DragEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import { expiryChoices, formatBytes, MAX_FILES_PER_SHARE } from '@toran/shared';
-import { Alert, Button, Card, Field, inputClassName, ProgressBar } from '@toran/ui';
 import {
-  ApiError,
+  Alert,
+  Button,
+  Card,
+  Field,
+  inputClassName,
+  ProgressBar,
+  selectClassName,
+} from '@toran/ui';
+import {
+  apiErrorMessage,
   beginUpload,
   cancelUpload,
   completeUpload,
@@ -13,6 +21,13 @@ import {
   uploadToStorage,
   type ShareResponse,
 } from '@/lib/api';
+import {
+  forgetShare,
+  readShareParam,
+  recallShare,
+  rememberShare,
+  SHARE_PARAM,
+} from '@/lib/shareSession';
 import { ShareResult } from './ShareResult';
 
 export interface UploadPanelProps {
@@ -40,6 +55,7 @@ interface Selected {
 let nextKey = 0;
 
 export function UploadPanel(props: UploadPanelProps) {
+  const router = useRouter();
   const fileInputId = useId();
   const expiryId = useId();
   const passwordId = useId();
@@ -66,6 +82,24 @@ export function UploadPanel(props: UploadPanelProps) {
   const [useDownloadLimit, setUseDownloadLimit] = useState(false);
   const [downloadLimit, setDownloadLimit] = useState('1');
 
+  // A link in the address bar outlives this component's state, so a reload lands
+  // back on the link it names instead of on an empty form.
+  useEffect(() => {
+    const token = readShareParam(window.location.search);
+    if (!token) {
+      return;
+    }
+    const remembered = recallShare(token);
+    if (remembered) {
+      setResult(remembered);
+      setPhase('done');
+      return;
+    }
+    // The token is real but this tab holds no manage grant for it, so the
+    // uploader's view has nothing to offer. The visitor's page does.
+    router.replace(`/s/${encodeURIComponent(token)}`);
+  }, [router]);
+
   const choices = useMemo(() => expiryChoices(props.maxExpirySeconds), [props.maxExpirySeconds]);
   const totalBytes = useMemo(
     () => selected.reduce((sum, entry) => sum + entry.file.size, 0),
@@ -77,7 +111,9 @@ export function UploadPanel(props: UploadPanelProps) {
       setError(null);
       setFileError(null);
       const list = Array.from(incoming ?? []);
-      if (list.length === 0) return;
+      if (list.length === 0) {
+        return;
+      }
 
       const accepted: Selected[] = [];
       const rejected: string[] = [];
@@ -124,6 +160,11 @@ export function UploadPanel(props: UploadPanelProps) {
   };
 
   const reset = () => {
+    const token = result?.share.token;
+    if (token) {
+      forgetShare(token);
+      window.history.replaceState(null, '', window.location.pathname);
+    }
     abortRef.current = null;
     uploadIdRef.current = null;
     setSelected([]);
@@ -138,7 +179,9 @@ export function UploadPanel(props: UploadPanelProps) {
     setUsePassword(false);
     setUseDownloadLimit(false);
     setDownloadLimit('1');
-    if (inputRef.current) inputRef.current.value = '';
+    if (inputRef.current) {
+      inputRef.current.value = '';
+    }
   };
 
   const cancel = async () => {
@@ -159,7 +202,9 @@ export function UploadPanel(props: UploadPanelProps) {
   };
 
   const submit = async () => {
-    if (selected.length === 0 || phase === 'uploading' || phase === 'finalising') return;
+    if (selected.length === 0 || phase === 'uploading' || phase === 'finalising') {
+      return;
+    }
 
     if (usePassword && password.length < 8) {
       setError('Passwords must be at least 8 characters.');
@@ -228,13 +273,29 @@ export function UploadPanel(props: UploadPanelProps) {
       // over all of them at once.
       setPhase('finalising');
       setActiveName(null);
+      // Both are omitted rather than sent as undefined, so an unchecked box
+      // asks for no password and no limit instead of asking for empty ones.
+      const options: { password?: string; maxDownloads?: number } = {};
+      if (usePassword) {
+        options.password = password;
+      }
+      if (useDownloadLimit) {
+        options.maxDownloads = limit;
+      }
+
       const share = await createShare({
         fileIds,
         manageKeys,
         expiresInSeconds: Number(expiry),
-        ...(usePassword ? { password } : {}),
-        ...(useDownloadLimit ? { maxDownloads: limit } : {}),
+        ...options,
       });
+
+      // Order matters: the entry has to exist before the URL can point at it,
+      // or a reload racing this would redirect away from a link we do hold.
+      rememberShare(share);
+      if (share.share.token) {
+        window.history.replaceState(null, '', `?${SHARE_PARAM}=${share.share.token}`);
+      }
 
       setResult(share);
       setPhase('done');
@@ -246,9 +307,7 @@ export function UploadPanel(props: UploadPanelProps) {
       setPhase('idle');
       setSentBytes(0);
       setActiveName(null);
-      setError(
-        caught instanceof ApiError ? caught.message : 'The upload failed. Please try again.',
-      );
+      setError(apiErrorMessage(caught, 'The upload failed. Please try again.'));
     }
   };
 
@@ -263,17 +322,63 @@ export function UploadPanel(props: UploadPanelProps) {
   }
 
   const busy = phase === 'uploading' || phase === 'finalising';
-  const percent = phase === 'finalising' || totalBytes === 0 ? 100 : (sentBytes / totalBytes) * 100;
   const many = selected.length > 1;
+
+  // Finalising happens after the last byte is sent, so the bar is full while the
+  // link is minted. An empty selection has nothing to divide by.
+  let percent = 100;
+  if (phase !== 'finalising' && totalBytes > 0) {
+    percent = (sentBytes / totalBytes) * 100;
+  }
+
+  let heading = 'Share a File';
+  let subject = 'file goes';
+  if (many) {
+    heading = 'Share Files';
+    subject = 'files go';
+  }
+
+  let choosePrompt = 'Choose Files';
+  if (selected.length > 0) {
+    choosePrompt = 'Add More Files';
+  }
+
+  let downloadLimitHint = `Between 1 and ${props.maxDownloadLimit}.`;
+  if (many) {
+    downloadLimitHint = `Between 1 and ${props.maxDownloadLimit}, counted separately for each file.`;
+  }
+
+  // The per-file name is only worth showing when there is more than one file to
+  // tell apart, and only once one is actually in flight.
+  let progressText = `Uploading… ${Math.round(percent)}%`;
+  if (many) {
+    let activeSuffix = '';
+    if (activeName !== null) {
+      activeSuffix = ` - ${activeName}`;
+    }
+    const position = Math.min(doneCount + 1, selected.length);
+    progressText =
+      `Uploading ${position} of ${selected.length}${activeSuffix} … ` + `${Math.round(percent)}%`;
+  }
+  if (phase === 'finalising') {
+    progressText = 'Creating the link…';
+  }
+
+  let submitLabel = 'Create Share Link';
+  if (busy) {
+    submitLabel = 'Uploading';
+  }
+
+  let dropZoneTone = 'border-line bg-surface-sunken';
+  if (dragging) {
+    dropZoneTone = 'border-brand-500 bg-brand-50';
+  }
 
   return (
     <Card>
-      <h1 className="text-2xl font-semibold tracking-tight text-ink">
-        {many ? 'Share files' : 'Share a file'}
-      </h1>
+      <h1 className="text-2xl font-semibold tracking-tight text-ink">{heading}</h1>
       <p className="mt-2 text-sm text-ink-muted">
-        Your {many ? 'files go' : 'file goes'} straight from this browser to storage. Toran only
-        ever handles the link.
+        Your {subject} straight from this browser to storage. Toran only ever handles the link.
       </p>
 
       <div className="mt-6 space-y-6">
@@ -287,7 +392,7 @@ export function UploadPanel(props: UploadPanelProps) {
             onDrop={onDrop}
             className={[
               'rounded-xl border-2 border-dashed p-6 text-center transition-colors',
-              dragging ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface-sunken',
+              dropZoneTone,
             ].join(' ')}
           >
             <p className="text-sm text-ink-muted">Drag files here, or</p>
@@ -295,7 +400,7 @@ export function UploadPanel(props: UploadPanelProps) {
               htmlFor={fileInputId}
               className="mt-3 inline-flex cursor-pointer items-center rounded-lg border border-line bg-surface-raised px-4 py-2.5 text-sm font-medium text-ink hover:bg-surface focus-within:ring-2 focus-within:ring-brand-500"
             >
-              {selected.length > 0 ? 'Add more files' : 'Choose files'}
+              {choosePrompt}
               <input
                 ref={inputRef}
                 id={fileInputId}
@@ -314,14 +419,14 @@ export function UploadPanel(props: UploadPanelProps) {
               Up to {formatBytes(props.maxFileSizeBytes)} each, {MAX_FILES_PER_SHARE} files per link
             </p>
           </div>
-          {fileError ? (
+          {fileError && (
             <p className="mt-2 text-xs font-medium text-danger-700" role="alert">
               {fileError}
             </p>
-          ) : null}
+          )}
         </div>
 
-        {selected.length > 0 ? (
+        {selected.length > 0 && (
           <ul className="space-y-2" data-testid="selected-file">
             {selected.map((entry) => (
               <li
@@ -334,7 +439,7 @@ export function UploadPanel(props: UploadPanelProps) {
                   </p>
                   <p className="text-xs text-ink-muted">{formatBytes(entry.file.size)}</p>
                 </div>
-                {!busy ? (
+                {!busy && (
                   <button
                     type="button"
                     onClick={() => removeFile(entry.key)}
@@ -343,24 +448,24 @@ export function UploadPanel(props: UploadPanelProps) {
                     Remove
                     <span className="sr-only"> {entry.file.name}</span>
                   </button>
-                ) : null}
+                )}
               </li>
             ))}
-            {many ? (
+            {many && (
               <li className="px-1 text-xs text-ink-subtle">
                 {selected.length} files · {formatBytes(totalBytes)} total · one link
               </li>
-            ) : null}
+            )}
           </ul>
-        ) : null}
+        )}
 
         <fieldset className="space-y-4" disabled={busy}>
-          <legend className="sr-only">Link options</legend>
+          <legend className="sr-only">Link Options</legend>
 
-          <Field label="Link expires after" htmlFor={expiryId}>
+          <Field label="Link Expires After" htmlFor={expiryId}>
             <select
               id={expiryId}
-              className={inputClassName}
+              className={selectClassName}
               value={expiry}
               onChange={(event) => setExpiry(event.target.value)}
             >
@@ -380,9 +485,9 @@ export function UploadPanel(props: UploadPanelProps) {
                 onChange={(event) => setUsePassword(event.target.checked)}
                 className="h-4 w-4 rounded border-line text-brand-600 focus-visible:ring-2 focus-visible:ring-brand-500"
               />
-              Require a password
+              Require a Password
             </label>
-            {usePassword ? (
+            {usePassword && (
               <Field
                 label="Password"
                 htmlFor={passwordId}
@@ -398,7 +503,7 @@ export function UploadPanel(props: UploadPanelProps) {
                   onChange={(event) => setPassword(event.target.value)}
                 />
               </Field>
-            ) : null}
+            )}
           </div>
 
           <div className="space-y-3">
@@ -409,18 +514,10 @@ export function UploadPanel(props: UploadPanelProps) {
                 onChange={(event) => setUseDownloadLimit(event.target.checked)}
                 className="h-4 w-4 rounded border-line text-brand-600 focus-visible:ring-2 focus-visible:ring-brand-500"
               />
-              Limit the number of downloads
+              Limit the Number of Downloads
             </label>
-            {useDownloadLimit ? (
-              <Field
-                label="Maximum downloads"
-                htmlFor={downloadsId}
-                hint={
-                  many
-                    ? `Between 1 and ${props.maxDownloadLimit}, counted separately for each file.`
-                    : `Between 1 and ${props.maxDownloadLimit}.`
-                }
-              >
+            {useDownloadLimit && (
+              <Field label="Maximum Downloads" htmlFor={downloadsId} hint={downloadLimitHint}>
                 <input
                   id={downloadsId}
                   type="number"
@@ -432,35 +529,30 @@ export function UploadPanel(props: UploadPanelProps) {
                   onChange={(event) => setDownloadLimit(event.target.value)}
                 />
               </Field>
-            ) : null}
+            )}
           </div>
         </fieldset>
 
-        {busy ? (
+        {busy && (
           <div className="space-y-2" data-testid="upload-progress">
-            <ProgressBar value={percent} label="Upload progress" />
+            <ProgressBar value={percent} label="Upload Progress" />
             <p className="text-xs text-ink-muted" aria-live="polite">
-              {phase === 'finalising'
-                ? 'Creating the link…'
-                : many
-                  ? `Uploading ${Math.min(doneCount + 1, selected.length)} of ${selected.length}` +
-                    `${activeName === null ? '' : ` — ${activeName}`} … ${Math.round(percent)}%`
-                  : `Uploading… ${Math.round(percent)}%`}
+              {progressText}
             </p>
           </div>
-        ) : null}
+        )}
 
-        {error ? <Alert title="Upload failed">{error}</Alert> : null}
+        {error && <Alert title="Upload Failed">{error}</Alert>}
 
         <div className="flex flex-wrap gap-3">
           <Button onClick={submit} disabled={selected.length === 0 || busy} loading={busy}>
-            {busy ? 'Uploading' : 'Create share link'}
+            {submitLabel}
           </Button>
-          {busy ? (
+          {busy && (
             <Button variant="secondary" onClick={cancel}>
               Cancel
             </Button>
-          ) : null}
+          )}
         </div>
       </div>
     </Card>

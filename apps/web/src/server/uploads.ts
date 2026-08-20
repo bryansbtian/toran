@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import 'server-only';
 import {
   MAX_FILES_PER_SHARE,
@@ -7,6 +6,7 @@ import {
   resolveExpiry,
   safeContentType,
   type CreateUploadRequest,
+  type ErrorCode,
   type CreateUploadResponse,
   type FileSummary,
   type ShareFile,
@@ -189,7 +189,9 @@ export async function finishUpload(
   const now = clock.now();
 
   const existing = await findUploadSession(context.db, input.uploadId);
-  if (!existing) throw new ToranError('NOT_FOUND', { message: 'That upload was not found.' });
+  if (!existing) {
+    throw new ToranError('NOT_FOUND', { message: 'That upload was not found.' });
+  }
 
   // Verify the object really is in storage and really is the declared size.
   // The presigned PUT already pinned Content-Length, but a compatible storage
@@ -220,7 +222,12 @@ export async function finishUpload(
     throw new ToranError('UPLOAD_SIZE_MISMATCH');
   }
 
-  const nextStatus = config.scanning.enabled ? 'scanning' : 'ready';
+  // Only a deployment that has explicitly turned scanning off reaches 'ready'
+  // here. Production configuration refuses to start in that state.
+  let nextStatus: 'scanning' | 'ready' = 'ready';
+  if (config.scanning.enabled) {
+    nextStatus = 'scanning';
+  }
   const outcome = await completeUpload(context.db, {
     sessionId: input.uploadId,
     actualSize: head.size,
@@ -254,10 +261,11 @@ export async function finishUpload(
     });
   }
 
-  context.log.info(
-    { fileId: file.id, created, actualSize: head.size },
-    created ? 'upload completed' : 'upload completion replayed',
-  );
+  let completionMessage = 'upload completion replayed';
+  if (created) {
+    completionMessage = 'upload completed';
+  }
+  context.log.info({ fileId: file.id, created, actualSize: head.size }, completionMessage);
 
   // No link is minted here. A link may serve several files, so it cannot exist
   // until every one of them has been uploaded; `createShare` is the step that
@@ -333,7 +341,9 @@ export async function createShare(
   }
 
   const first = rows[0];
-  if (!first) throw new ToranError('VALIDATION_FAILED', { message: 'Select at least one file.' });
+  if (!first) {
+    throw new ToranError('VALIDATION_FAILED', { message: 'Select at least one file.' });
+  }
 
   if (input.maxDownloads !== undefined && input.maxDownloads > config.limits.maxDownloadLimit) {
     throw new ToranError('DOWNLOAD_LIMIT_OUT_OF_RANGE', {
@@ -361,10 +371,11 @@ export async function createShare(
       });
     }
     // Never past the content: the files were given their lifetime at upload.
-    expiresAt =
-      expiresAt === null
-        ? expiry.expiresAt
-        : new Date(Math.min(expiry.expiresAt.getTime(), expiresAt.getTime()));
+    if (expiresAt === null) {
+      expiresAt = expiry.expiresAt;
+    } else {
+      expiresAt = new Date(Math.min(expiry.expiresAt.getTime(), expiresAt.getTime()));
+    }
   }
 
   const token = generateShareToken();
@@ -372,7 +383,7 @@ export async function createShare(
     fileIds: rows.map((file) => file.id),
     // Only the hash is ever persisted. The raw token below is returned once.
     tokenHash: hashShareToken(token),
-    passwordHash: input.password === undefined ? null : await hashPassword(input.password),
+    passwordHash: await optionalPasswordHash(input.password),
     expiresAt,
     maxDownloads: input.maxDownloads ?? null,
   });
@@ -411,7 +422,9 @@ function ownsFile(
 function earliestExpiry(rows: readonly FileRow[]): Date | null {
   let earliest: Date | null = null;
   for (const file of rows) {
-    if (file.expiresAt === null) continue;
+    if (file.expiresAt === null) {
+      continue;
+    }
     if (earliest === null || file.expiresAt.getTime() < earliest.getTime()) {
       earliest = file.expiresAt;
     }
@@ -421,7 +434,9 @@ function earliestExpiry(rows: readonly FileRow[]): Date | null {
 
 export async function cancelUpload(context: RequestContext, uploadId: string): Promise<void> {
   const existing = await findUploadSession(context.db, uploadId);
-  if (!existing) throw new ToranError('NOT_FOUND');
+  if (!existing) {
+    throw new ToranError('NOT_FOUND');
+  }
 
   const cancelled = await abortUploadSession(context.db, uploadId, context.clock.now());
   if (cancelled) {
@@ -458,14 +473,24 @@ export function toShareSummary(
     // Freshly created, so nothing has been spent yet.
     remainingDownloads: maxDownloads,
   }));
-  if (!first) throw new Error('a share link always has at least one file');
+  if (!first) {
+    throw new Error('a share link always has at least one file');
+  }
+
+  // Without the raw token the URL cannot be reconstructed, which is exactly
+  // the property we want: only the creator's single response carries it, and
+  // every later read of this share rebuilds the summary without one.
+  let url = `${appUrl}/s/`;
+  const raw: { token?: string } = {};
+  if (token) {
+    url = `${appUrl}/s/${token}`;
+    raw.token = token;
+  }
 
   return {
     shareId: row.id,
-    // Without the raw token the URL cannot be reconstructed, which is exactly
-    // the property we want: only the creator's single response contains it.
-    url: token ? `${appUrl}/s/${token}` : `${appUrl}/s/`,
-    ...(token ? { token } : {}),
+    url,
+    ...raw,
     expiresAt: row.expiresAt?.toISOString() ?? null,
     maxDownloads: row.maxDownloads,
     passwordProtected: row.passwordHash !== null,
@@ -475,12 +500,25 @@ export function toShareSummary(
   };
 }
 
+/** Hashing is skipped entirely when a link has no password, not fed a placeholder. */
+async function optionalPasswordHash(password: string | undefined): Promise<string | null> {
+  if (password === undefined) {
+    return null;
+  }
+  return await hashPassword(password);
+}
+
 function storageFailure(error: unknown, internal: string): ToranError {
-  const retryable = error instanceof StorageError ? error.retryable : false;
-  return new ToranError(retryable ? 'STORAGE_UNAVAILABLE' : 'INTERNAL_ERROR', {
-    internal,
-    cause: error,
-  });
+  let retryable = false;
+  if (error instanceof StorageError) {
+    retryable = error.retryable;
+  }
+
+  let code: ErrorCode = 'INTERNAL_ERROR';
+  if (retryable) {
+    code = 'STORAGE_UNAVAILABLE';
+  }
+  return new ToranError(code, { internal, cause: error });
 }
 
 function formatMib(bytes: number): string {

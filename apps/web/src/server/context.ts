@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import 'server-only';
 import { getConfig, type ToranConfig } from '@toran/config';
 import { createDatabase, PostgresRateLimiter, type DatabaseHandle } from '@toran/database';
@@ -46,10 +45,12 @@ function buildServerContext(): ServerContext {
     forcePathStyle: config.storage.forcePathStyle,
   });
 
-  const rateLimiter: RateLimiter =
-    config.rateLimit.backend === 'postgres'
-      ? new PostgresRateLimiter(handle.db)
-      : new MemoryRateLimiter();
+  // The in-memory limiter is per-process, so production configuration refuses
+  // to start with it. Reaching it here means a single-process dev instance.
+  let rateLimiter: RateLimiter = new MemoryRateLimiter();
+  if (config.rateLimit.backend === 'postgres') {
+    rateLimiter = new PostgresRateLimiter(handle.db);
+  }
 
   logger.info(
     {

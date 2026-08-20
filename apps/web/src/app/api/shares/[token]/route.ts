@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { shareTokenSchema, ToranError, uuidSchema } from '@toran/shared';
 import {
   hashShareToken,
@@ -7,7 +6,7 @@ import {
   extractShareToken,
 } from '@toran/security';
 import { findShareById, findShareByTokenHash, revokeShareLink } from '@toran/database';
-import { assertSameOrigin, handler, json } from '@/server/http';
+import { assertSameOrigin, enforceRateLimit, handler, json } from '@/server/http';
 import { grantCookieNameFor, isAuthorized, lookupShare, toPublicView } from '@/server/downloads';
 import { readCookie } from '@/server/cookies';
 
@@ -24,6 +23,16 @@ export const runtime = 'nodejs';
 export const GET = handler<{ token: string }>(
   'GET /api/shares/[token]',
   async (request, context, params) => {
+    // Limited before the token is even parsed, so a malformed token costs the
+    // same budget as a real one and the endpoint cannot be swept for free.
+    // The budget has to clear the share page's own poll rate while a file is
+    // still being scanned; see TORAN_RATE_LIMIT_LOOKUP in
+    // packages/config/src/schema.ts.
+    await enforceRateLimit(context, {
+      scope: 'share-lookup',
+      rule: context.config.rateLimit.lookup,
+    });
+
     const token = shareTokenSchema.safeParse(params.token);
     if (!token.success) {
       // Byte-for-byte the shape `toPublicView` produces for a link that cannot
@@ -84,15 +93,21 @@ export const DELETE = handler<{ token: string }>(
       shareLinkId = found?.share.id ?? null;
     } else {
       const token = extractShareToken(params.token);
-      if (!token) throw new ToranError('NOT_FOUND');
+      if (!token) {
+        throw new ToranError('NOT_FOUND');
+      }
       const found = await findShareByTokenHash(context.db, hashShareToken(token));
       shareLinkId = found?.share.id ?? null;
     }
 
-    if (!shareLinkId) throw new ToranError('NOT_FOUND');
+    if (!shareLinkId) {
+      throw new ToranError('NOT_FOUND');
+    }
 
     const revoked = await revokeShareLink(context.db, shareLinkId, now);
-    if (!revoked) throw new ToranError('NOT_FOUND');
+    if (!revoked) {
+      throw new ToranError('NOT_FOUND');
+    }
 
     context.log.info({ shareLinkId }, 'share link revoked');
     return json({ revoked: true, revokedAt: (revoked.revokedAt ?? now).toISOString() }, context);

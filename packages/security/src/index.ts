@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 export * from './authorization.js';
 export * from './identity.js';
 export * from './passwords.js';

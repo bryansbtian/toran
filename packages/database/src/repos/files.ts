@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { FileStatus } from '@toran/shared';
 import type { Database } from '../client.js';
@@ -42,7 +41,9 @@ export async function createUpload(db: Database, input: CreateUploadInput): Prom
         ownerId: input.ownerId,
       })
       .returning();
-    if (!file) throw new Error('failed to create file row');
+    if (!file) {
+      throw new Error('failed to create file row');
+    }
 
     const [session] = await tx
       .insert(uploadSessions)
@@ -55,7 +56,9 @@ export async function createUpload(db: Database, input: CreateUploadInput): Prom
         shareExpiresAt: input.shareExpiresAt,
       })
       .returning();
-    if (!session) throw new Error('failed to create upload session');
+    if (!session) {
+      throw new Error('failed to create upload session');
+    }
 
     return { file, session };
   });
@@ -119,12 +122,16 @@ export async function completeUpload(
       .for('update')
       .limit(1);
 
-    if (!existing) return { kind: 'not_found' } as const;
+    if (!existing) {
+      return { kind: 'not_found' } as const;
+    }
 
     if (existing.session.status === 'completed') {
       return { kind: 'already_completed', file: existing.file, session: existing.session } as const;
     }
-    if (existing.session.status === 'aborted') return { kind: 'aborted' } as const;
+    if (existing.session.status === 'aborted') {
+      return { kind: 'aborted' } as const;
+    }
     if (
       existing.session.status === 'expired' ||
       existing.session.expiresAt.getTime() <= input.now.getTime()
@@ -152,9 +159,10 @@ export async function completeUpload(
       // The file left the pre-upload states between our lock and this update,
       // which only happens when another completion already ran.
       const current = await findFileById(tx as unknown as Database, existing.file.id);
-      return current
-        ? ({ kind: 'already_completed', file: current, session: existing.session } as const)
-        : ({ kind: 'not_found' } as const);
+      if (!current) {
+        return { kind: 'not_found' } as const;
+      }
+      return { kind: 'already_completed', file: current, session: existing.session } as const;
     }
 
     return { kind: 'completed', file, session: existing.session } as const;
@@ -171,17 +179,34 @@ export async function applyScanResult(
     readonly now: Date;
   },
 ): Promise<FileRow | null> {
+  // A blocked file is soft-deleted in the same statement that records the
+  // verdict, so no reader can observe it as merely "not ready" in between.
+  const changes: Partial<typeof files.$inferInsert> = {
+    status: input.status,
+    scanResult: input.scanResult,
+    updatedAt: input.now,
+  };
+  if (input.status === 'blocked') {
+    changes.deletedAt = input.now;
+  }
+
   const [row] = await db
     .update(files)
-    .set({
-      status: input.status,
-      scanResult: input.scanResult,
-      updatedAt: input.now,
-      ...(input.status === 'blocked' ? { deletedAt: input.now } : {}),
-    })
+    .set(changes)
     .where(and(eq(files.id, input.fileId), eq(files.status, 'scanning')))
     .returning();
   return row ?? null;
+}
+
+/**
+ * Narrows the update to a file that is still in one of the expected states, so
+ * a transition cannot overwrite a decision another writer already committed.
+ */
+function statusTransitionTarget(fileId: string, onlyFrom: readonly FileStatus[] | undefined) {
+  if (onlyFrom && onlyFrom.length > 0) {
+    return and(eq(files.id, fileId), inArray(files.status, [...onlyFrom]));
+  }
+  return eq(files.id, fileId);
 }
 
 export async function markFileStatus(
@@ -193,19 +218,18 @@ export async function markFileStatus(
     readonly onlyFrom?: readonly FileStatus[];
   },
 ): Promise<FileRow | null> {
-  const isTerminal = input.status === 'deleted' || input.status === 'blocked';
+  const changes: Partial<typeof files.$inferInsert> = {
+    status: input.status,
+    updatedAt: input.now,
+  };
+  if (input.status === 'deleted' || input.status === 'blocked') {
+    changes.deletedAt = input.now;
+  }
+
   const [row] = await db
     .update(files)
-    .set({
-      status: input.status,
-      updatedAt: input.now,
-      ...(isTerminal ? { deletedAt: input.now } : {}),
-    })
-    .where(
-      input.onlyFrom && input.onlyFrom.length > 0
-        ? and(eq(files.id, input.fileId), inArray(files.status, [...input.onlyFrom]))
-        : eq(files.id, input.fileId),
-    )
+    .set(changes)
+    .where(statusTransitionTarget(input.fileId, input.onlyFrom))
     .returning();
   return row ?? null;
 }
@@ -258,7 +282,9 @@ export async function abortUploadSession(
       .set({ status: 'aborted' })
       .where(and(eq(uploadSessions.id, sessionId), eq(uploadSessions.status, 'pending')))
       .returning();
-    if (!session) return false;
+    if (!session) {
+      return false;
+    }
     await tx
       .update(files)
       .set({ status: 'deleted', deletedAt: now, updatedAt: now })

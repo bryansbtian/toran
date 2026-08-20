@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { downloadRequestSchema, shareTokenSchema, ToranError } from '@toran/shared';
 import { assertSameOrigin, handler, json, readJson } from '@/server/http';
 import { grantCookieNameFor, issueDownload, lookupShare } from '@/server/downloads';
@@ -21,19 +20,24 @@ export const POST = handler<{ token: string }>(
     assertSameOrigin(request, context);
 
     const token = shareTokenSchema.safeParse(params.token);
-    if (!token.success) throw new ToranError('NOT_FOUND');
+    if (!token.success) {
+      throw new ToranError('NOT_FOUND');
+    }
 
     // Which file of the link to fetch. Omitted only when the link serves one.
     const body = await readJson(request, downloadRequestSchema, context);
 
     // Resolving the link first lets us read the correctly scoped grant cookie.
     const found = await lookupShare(context, token.data);
-    const grantCookie = found ? readCookie(request, grantCookieNameFor(found.share.id)) : null;
+    let grantCookie: string | null = null;
+    if (found) {
+      grantCookie = readCookie(request, grantCookieNameFor(found.share.id));
+    }
 
     const result = await issueDownload(context, {
       token: token.data,
       grantCookie,
-      ...(body.fileId !== undefined ? { fileId: body.fileId } : {}),
+      fileId: body.fileId,
     });
     return json(result, context);
   },

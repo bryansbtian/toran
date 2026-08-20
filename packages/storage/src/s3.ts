@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import {
   CopyObjectCommand,
   DeleteObjectCommand,
@@ -58,7 +57,7 @@ export class S3Storage implements StorageProvider {
       options.client ??
       new S3Client({
         region: options.region,
-        ...(options.endpoint ? { endpoint: options.endpoint } : {}),
+        ...endpointOverride(options.endpoint),
         forcePathStyle: options.forcePathStyle,
         credentials: {
           accessKeyId: options.accessKeyId,
@@ -130,7 +129,9 @@ export class S3Storage implements StorageProvider {
         lastModified: response.LastModified,
       };
     } catch (error) {
-      if (isNotFound(error)) return null;
+      if (isNotFound(error)) {
+        return null;
+      }
       throw wrap(error, 'failed to read object metadata');
     }
   }
@@ -147,7 +148,9 @@ export class S3Storage implements StorageProvider {
       }
       return body as NodeJS.ReadableStream;
     } catch (error) {
-      if (isNotFound(error)) throw new StorageError('object not found', false, { cause: error });
+      if (isNotFound(error)) {
+        throw new StorageError('object not found', false, { cause: error });
+      }
       throw wrap(error, 'failed to read object');
     }
   }
@@ -159,7 +162,9 @@ export class S3Storage implements StorageProvider {
     } catch (error) {
       // S3 delete is already idempotent, but some compatible implementations
       // surface a 404 rather than succeeding.
-      if (isNotFound(error)) return;
+      if (isNotFound(error)) {
+        return;
+      }
       throw wrap(error, 'failed to delete object');
     }
   }
@@ -205,8 +210,12 @@ export class S3Storage implements StorageProvider {
    * that the server addresses by its internal service name.
    */
   private toPublicUrl(signedUrl: string): string {
-    if (!this.options.publicEndpoint || !this.options.endpoint) return signedUrl;
-    if (this.options.publicEndpoint === this.options.endpoint) return signedUrl;
+    if (!this.options.publicEndpoint || !this.options.endpoint) {
+      return signedUrl;
+    }
+    if (this.options.publicEndpoint === this.options.endpoint) {
+      return signedUrl;
+    }
     const source = new URL(signedUrl);
     const target = new URL(this.options.publicEndpoint);
     source.protocol = target.protocol;
@@ -233,14 +242,33 @@ function isNotFound(error: unknown): boolean {
  * or request-signing detail. The original is kept as `cause` for structured
  * logs, which redact it before serialisation.
  */
+/**
+ * An absent endpoint has to be an absent key: the SDK reads an explicit
+ * `endpoint: undefined` as a configured value and stops resolving the default.
+ */
+function endpointOverride(endpoint: string | undefined): { endpoint?: string } {
+  if (!endpoint) {
+    return {};
+  }
+  return { endpoint };
+}
+
+function errorCode(error: unknown): string {
+  if (error instanceof S3ServiceException) {
+    return error.name ?? '';
+  }
+  if (typeof error === 'object' && error !== null && 'name' in error) {
+    return String(error.name);
+  }
+  return '';
+}
+
 function wrap(error: unknown, message: string): StorageError {
-  const code =
-    error instanceof S3ServiceException
-      ? (error.name ?? '')
-      : typeof error === 'object' && error !== null && 'name' in error
-        ? String(error.name)
-        : '';
-  const status = error instanceof S3ServiceException ? (error.$metadata?.httpStatusCode ?? 0) : 0;
+  const code = errorCode(error);
+  let status = 0;
+  if (error instanceof S3ServiceException) {
+    status = error.$metadata?.httpStatusCode ?? 0;
+  }
   const retryable = RETRYABLE_CODES.has(code) || status >= 500 || status === 429;
   return new StorageError(message, retryable, { cause: error });
 }

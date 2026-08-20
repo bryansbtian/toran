@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { defineConfig } from 'vitest/config';
 
 /** Worker integration tests: real PostgreSQL, in-memory storage and scanner. */

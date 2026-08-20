@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: MIT
-
 /**
  * Stable machine-readable error codes. Clients may branch on these; the
  * accompanying message is for humans and may change.
@@ -133,13 +131,11 @@ export class ToranError extends Error {
   }
 
   toBody(requestId?: string): ApiErrorBody {
-    return {
-      error: {
-        code: this.code,
-        message: this.message,
-        ...(requestId ? { requestId } : {}),
-      },
-    };
+    const error: ApiErrorBody['error'] = { code: this.code, message: this.message };
+    if (requestId) {
+      return { error: { ...error, requestId } };
+    }
+    return { error };
   }
 }
 
@@ -153,4 +149,28 @@ export function defaultStatusFor(code: ErrorCode): number {
 
 export function defaultMessageFor(code: ErrorCode): string {
   return DEFAULT_MESSAGE[code];
+}
+
+/**
+ * Message of a caught value, or a fallback when what was thrown was not an
+ * Error. Callers pass a fallback that names their own context, because
+ * "unknown error" on its own tells an operator nothing.
+ */
+export function errorMessage(error: unknown, fallback = 'unknown error'): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return fallback;
+}
+
+/**
+ * Narrows a caught value for structured logging. Anything that is not an Error
+ * is dropped rather than stringified: the logger redacts Error shapes, and a
+ * thrown object of unknown shape is exactly what redaction cannot reason about.
+ */
+export function asError(error: unknown): Error | undefined {
+  if (error instanceof Error) {
+    return error;
+  }
+  return undefined;
 }

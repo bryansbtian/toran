@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { loadConfig } from '@toran/config';
 import { sql } from 'drizzle-orm';
 import { createDatabase, type DatabaseHandle } from '../client.js';
@@ -47,7 +46,9 @@ export async function isDatabaseReachable(): Promise<boolean> {
  * job must not pass.
  */
 export function allowIntegrationSkip(reachable: boolean, label: string): boolean {
-  if (reachable) return true;
+  if (reachable) {
+    return true;
+  }
 
   const detail =
     `${label}: DATABASE_URL is unreachable.\n` +
@@ -78,7 +79,7 @@ export async function createTestDatabase(): Promise<TestDatabase> {
     // every table in one statement.
     await handle.sql`
       truncate table
-        download_events, abuse_reports, share_links, upload_sessions,
+        download_events, share_links, upload_sessions,
         files, jobs, rate_limits, users
       restart identity cascade
     `;

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { NextResponse, type NextRequest } from 'next/server';
 
 /**
@@ -9,7 +8,7 @@ import { NextResponse, type NextRequest } from 'next/server';
  * deployment setting. `headers()` is evaluated during `next build`, so a
  * prebuilt image (the Docker image, a published container) would bake in
  * whatever storage endpoint the *builder* had - which is wrong for every
- * self-hoster. Reading it here means one image works for any storage endpoint.
+ * deployment. Reading it here means one image works for any storage endpoint.
  */
 export const config = {
   // Everything except Next's own static output, which needs no policy and is
@@ -18,7 +17,9 @@ export const config = {
 };
 
 function originOf(value: string | undefined): string {
-  if (!value) return '';
+  if (!value) {
+    return '';
+  }
   try {
     return new URL(value).origin;
   } catch {
@@ -38,15 +39,25 @@ export function middleware(request: NextRequest): NextResponse {
     (origin, index, all) => origin !== '' && all.indexOf(origin) === index,
   );
 
+  // `unsafe-eval` is the React refresh runtime and must never reach a built
+  // image; the production directive is the one that ships.
+  let scriptSrc = "script-src 'self' 'unsafe-inline'";
+  if (isDevelopment) {
+    scriptSrc = "script-src 'self' 'unsafe-inline' 'unsafe-eval'";
+  }
+
+  const upgrade: string[] = ['upgrade-insecure-requests'];
+  if (isDevelopment) {
+    upgrade.length = 0;
+  }
+
   const csp = [
     "default-src 'self'",
     // Next.js injects inline bootstrap and flight-data scripts. This is safe
     // here specifically because no uploaded content is ever rendered on this
-    // origin - files are served from storage as attachments. See
-    // docs/THREAT_MODEL.md, "Cross-site scripting".
-    isDevelopment
-      ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
-      : "script-src 'self' 'unsafe-inline'",
+    // origin - files are served from storage as attachments, so there is no
+    // path by which an uploaded byte becomes script on this origin.
+    scriptSrc,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
     "font-src 'self' data:",
@@ -57,7 +68,7 @@ export function middleware(request: NextRequest): NextResponse {
     "base-uri 'none'",
     "frame-ancestors 'none'",
     "worker-src 'self' blob:",
-    ...(isDevelopment ? [] : ['upgrade-insecure-requests']),
+    ...upgrade,
   ].join('; ');
 
   response.headers.set('Content-Security-Policy', csp);

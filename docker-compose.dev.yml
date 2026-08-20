@@ -1,5 +1,3 @@
-# SPDX-License-Identifier: MIT
-#
 # Development infrastructure only: PostgreSQL, MinIO and ClamAV.
 # The Toran web app and worker run on the host via `npm run dev`.
 #

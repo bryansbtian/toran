@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { z } from 'zod';
 import { applyScanResult, enqueueJob, findFileById, revokeAllSharesForFile } from '@toran/database';
 import { quarantineKeyFor } from '@toran/storage';
