@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';

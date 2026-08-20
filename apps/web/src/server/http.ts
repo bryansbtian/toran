@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import 'server-only';
 import type { z } from 'zod';
 import { ToranError, isToranError, type ApiErrorBody, type ErrorCode } from '@toran/shared';
@@ -27,18 +26,49 @@ export interface RequestContext extends ServerContext {
   readonly startedAt: number;
 }
 
+/**
+ * Where the client address is read from, and when it may be believed.
+ *
+ * Next.js never exposes the TCP peer, so the only candidates are request
+ * headers - and a request header is written by whoever sent the request. They
+ * carry weight only when a proxy in front of Toran overwrites them, and the
+ * deployment names that proxy in `TORAN_TRUSTED_PROXIES`.
+ *
+ * With no proxies declared there is nothing trustworthy to read, so nothing is
+ * read: every caller collapses onto one identifier and shares one budget. That
+ * is deliberately the unhelpful outcome. Believing the headers instead would
+ * let any client mint a fresh identity per request by varying `X-Real-IP`,
+ * which turns every per-client rate limit and the anonymous upload quota into
+ * something callers opt into. Production refuses to start without proxies
+ * declared (see `collectProductionIssues`), so this path is development only.
+ *
+ * Declaring proxies asserts a topology as well as a list: Toran must not be
+ * reachable except through that proxy, and the proxy must overwrite these
+ * headers rather than pass a client-supplied value through.
+ */
+export function clientAddressClaim(
+  request: Request,
+  trustedProxies: readonly string[],
+): {
+  socketAddress: string | null;
+  forwardedFor: string | null;
+  trustedProxies: readonly string[];
+} {
+  if (trustedProxies.length === 0) {
+    return { socketAddress: null, forwardedFor: null, trustedProxies };
+  }
+  return {
+    socketAddress: request.headers.get('x-real-ip') ?? request.headers.get('x-vercel-ip'),
+    forwardedFor: request.headers.get('x-forwarded-for'),
+    trustedProxies,
+  };
+}
+
 export function createRequestContext(request: Request, route: string): RequestContext {
   const context = getServerContext();
   const requestId = generateRequestId();
 
-  const clientIp = resolveClientIp({
-    // Next.js does not surface the socket peer address; the platform-provided
-    // header is the closest equivalent, and it is only trusted when the
-    // deployment declares its proxies.
-    socketAddress: request.headers.get('x-real-ip') ?? request.headers.get('x-vercel-ip') ?? null,
-    forwardedFor: request.headers.get('x-forwarded-for'),
-    trustedProxies: context.config.app.trustedProxies,
-  });
+  const clientIp = resolveClientIp(clientAddressClaim(request, context.config.app.trustedProxies));
 
   const clientId = anonymousIdentifier(clientIp, {
     secret: context.config.app.secretKey,
@@ -86,20 +116,28 @@ export function json<T>(
  * traces, driver errors, object keys and endpoint names stay in the log.
  */
 export function errorResponse(error: unknown, context: RequestContext): Response {
-  const toran = isToranError(error) ? error : new ToranError('INTERNAL_ERROR', { cause: error });
+  let toran = new ToranError('INTERNAL_ERROR', { cause: error });
+  if (isToranError(error)) {
+    toran = error;
+  }
 
   const body: ApiErrorBody = toran.toBody(context.requestId);
 
-  const level = toran.status >= 500 ? 'error' : 'warn';
-  context.log[level](
-    {
-      statusCode: toran.status,
-      errorCategory: toran.code,
-      ...(toran.internal ? { internalDetail: toran.internal } : {}),
-      ...(toran.status >= 500 && error instanceof Error ? { err: error } : {}),
-    },
-    'request failed',
-  );
+  const fields: Record<string, unknown> = { statusCode: toran.status, errorCategory: toran.code };
+  if (toran.internal) {
+    fields.internalDetail = toran.internal;
+  }
+  // The cause chain is only worth carrying for a server fault. On a 4xx it is
+  // the client's own input, which has no place in the log.
+  if (toran.status >= 500 && error instanceof Error) {
+    fields.err = error;
+  }
+
+  if (toran.status >= 500) {
+    context.log.error(fields, 'request failed');
+  } else {
+    context.log.warn(fields, 'request failed');
+  }
 
   finish(context, toran.status);
 
@@ -159,9 +197,11 @@ export async function readJson<T extends z.ZodTypeAny>(
     throw new ToranError('PAYLOAD_TOO_LARGE');
   }
 
-  let parsed: unknown;
+  let parsed: unknown = {};
   try {
-    parsed = raw.length === 0 ? {} : JSON.parse(raw);
+    if (raw.length > 0) {
+      parsed = JSON.parse(raw);
+    }
   } catch {
     throw new ToranError('VALIDATION_FAILED', { message: 'The request body is not valid JSON.' });
   }
@@ -205,14 +245,22 @@ function schemeOf(url: string): string | null {
 function addressedOrigin(request: Request, context: RequestContext): string | null {
   const behindProxy = context.config.app.trustedProxies.length > 0;
   // A chain of proxies appends to these, and the first entry is the client's.
-  const forwarded = (name: string): string | null =>
-    behindProxy ? (request.headers.get(name)?.split(',')[0]?.trim() ?? null) : null;
+  const forwarded = (name: string): string | null => {
+    if (!behindProxy) {
+      return null;
+    }
+    return request.headers.get(name)?.split(',')[0]?.trim() ?? null;
+  };
 
   const host = forwarded('x-forwarded-host') ?? request.headers.get('host');
-  if (host === null || host === '') return null;
+  if (host === null || host === '') {
+    return null;
+  }
 
   const scheme = forwarded('x-forwarded-proto') ?? schemeOf(request.url);
-  if (scheme !== 'http' && scheme !== 'https') return null;
+  if (scheme !== 'http' && scheme !== 'https') {
+    return null;
+  }
 
   try {
     // Round-tripping through URL normalises the default port away, so the value
@@ -234,11 +282,15 @@ function addressedOrigin(request: Request, context: RequestContext): string | nu
  */
 export function assertSameOrigin(request: Request, context: RequestContext): void {
   const origin = request.headers.get('origin');
-  if (origin === null) return;
+  if (origin === null) {
+    return;
+  }
 
   const allowed = new Set<string>([context.config.app.url]);
   const addressed = addressedOrigin(request, context);
-  if (addressed !== null) allowed.add(addressed);
+  if (addressed !== null) {
+    allowed.add(addressed);
+  }
 
   if (!allowed.has(origin)) {
     throw new ToranError('FORBIDDEN_ORIGIN', {
@@ -263,7 +315,9 @@ export async function enforceRateLimit(
 ): Promise<void> {
   const key = rateLimitKey(options.scope, options.identifier ?? context.clientId);
   const decision = await context.rateLimiter.consume(key, options.rule, options.cost ?? 1);
-  if (decision.allowed) return;
+  if (decision.allowed) {
+    return;
+  }
 
   context.log.warn(
     { errorCategory: 'RATE_LIMITED', scope: options.scope, retryAfter: decision.retryAfterSeconds },
@@ -330,6 +384,8 @@ async function withTimeout(promise: Promise<Response>, context: RequestContext):
   try {
     return await Promise.race([promise, timeout]);
   } finally {
-    if (timer) clearTimeout(timer);
+    if (timer) {
+      clearTimeout(timer);
+    }
   }
 }

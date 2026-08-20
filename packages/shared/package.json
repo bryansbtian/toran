@@ -1,8 +1,8 @@
 {
   "name": "@toran/shared",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
-  "license": "MIT",
+  "license": "UNLICENSED",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

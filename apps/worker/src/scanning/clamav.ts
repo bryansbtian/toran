@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { Socket } from 'node:net';
 import { once } from 'node:events';
 
@@ -70,7 +69,10 @@ export class ClamAvScanner implements Scanner {
 
       let sent = 0;
       for await (const chunk of stream) {
-        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
+        let buffer = chunk as Buffer | string;
+        if (!Buffer.isBuffer(buffer)) {
+          buffer = Buffer.from(buffer);
+        }
         sent += buffer.byteLength;
         if (sent > this.options.maxScanBytes) {
           return {
@@ -160,8 +162,11 @@ export class ClamAvScanner implements Scanner {
       const onEnd = () => {
         cleanup();
         const reply = Buffer.concat(chunks).toString('utf8').replace(/\0+$/, '');
-        if (reply.length > 0) resolve(reply);
-        else reject(new Error('clamd closed the connection without replying'));
+        if (reply.length > 0) {
+          resolve(reply);
+        } else {
+          reject(new Error('clamd closed the connection without replying'));
+        }
       };
       const onError = (error: Error) => {
         cleanup();
@@ -213,7 +218,9 @@ export function interpretReply(reply: string): ScanVerdict {
   // pattern (anything ending in "OK") would let an unexpected reply - a proxy
   // banner, a future status line, a partially framed response - be read as a
   // clean verdict, which is the one mistake a scanner must never make.
-  if (/^stream:\s*OK$/.test(line)) return { kind: 'clean' };
+  if (/^stream:\s*OK$/.test(line)) {
+    return { kind: 'clean' };
+  }
   if (/\bFOUND$/.test(line)) {
     const match = /^stream:\s*(.+?)\s+FOUND$/.exec(line);
     return { kind: 'infected', signature: match?.[1] ?? 'unknown' };
@@ -231,7 +238,9 @@ export function interpretReply(reply: string): ScanVerdict {
 }
 
 function describe(error: unknown): string {
-  if (error instanceof Error) return `${error.name}: ${error.message}`.slice(0, 200);
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`.slice(0, 200);
+  }
   return 'unknown scanner error';
 }
 

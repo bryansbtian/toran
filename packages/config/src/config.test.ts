@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 import { ConfigurationError, loadConfig } from './index.js';
 import { parseRateLimitRule } from './parsers.js';
@@ -62,6 +61,7 @@ describe('loadConfig', () => {
     TORAN_DOWNLOAD_URL: 'https://dl.toran.example',
     TORAN_SECURE_COOKIES: 'true',
     TORAN_RATE_LIMIT_BACKEND: 'postgres',
+    TORAN_TRUSTED_PROXIES: '10.0.0.0/8',
   };
 
   it('accepts a hardened production environment', () => {
@@ -80,6 +80,9 @@ describe('loadConfig', () => {
     ['example s3 key', { S3_ACCESS_KEY_ID: 'toranminio' }],
     ['example s3 secret', { S3_SECRET_ACCESS_KEY: 'toranminio-dev-secret' }],
     ['example db password', { DATABASE_URL: 'postgres://toran:toran@db:5432/toran' }],
+    // With no proxy declared the web tier cannot tell one caller from another,
+    // so every per-client limit degrades to a single shared bucket.
+    ['no trusted proxy', { TORAN_TRUSTED_PROXIES: '' }],
   ])('refuses to start in production: %s', (_name, overrides) => {
     expect(() => load({ ...productionBase, ...overrides })).toThrow(ConfigurationError);
   });

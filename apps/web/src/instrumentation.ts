@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: MIT
-
 /**
  * Start-up configuration gate.
  *
@@ -17,10 +15,14 @@
 export async function register(): Promise<void> {
   // Next compiles this module for the edge runtime as well, because Toran's
   // middleware runs there. Edge has no filesystem and never serves the API.
-  if (process.env.NEXT_RUNTIME !== 'nodejs') return;
+  if (process.env.NEXT_RUNTIME !== 'nodejs') {
+    return;
+  }
   // During `next build` there is no deployment environment to validate yet:
   // the image is built once and configured later, by a different operator.
-  if (process.env.NEXT_PHASE === 'phase-production-build') return;
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    return;
+  }
 
   // `webpackIgnore` keeps `@toran/config` - which reads the filesystem - out of
   // the edge bundle, where `node:fs` does not resolve. At runtime this is a
@@ -36,10 +38,11 @@ export async function register(): Promise<void> {
       // unacceptable. It never includes their values, so this is safe to print.
       console.error(`[toran] refusing to start.\n${error.message}`);
     } else {
-      console.error(
-        '[toran] refusing to start: configuration could not be loaded.',
-        error instanceof Error ? error.message : 'unknown error',
-      );
+      let detail = 'unknown error';
+      if (error instanceof Error) {
+        detail = error.message;
+      }
+      console.error('[toran] refusing to start: configuration could not be loaded.', detail);
     }
     process.exit(1);
   }

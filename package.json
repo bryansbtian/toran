@@ -1,9 +1,9 @@
 {
   "name": "toran",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "Toran - open-source, self-hostable secure file sharing.",
-  "license": "MIT",
+  "description": "Toran - secure file sharing that keeps file contents out of the application server.",
+  "license": "UNLICENSED",
   "type": "module",
   "packageManager": "npm@11.6.0",
   "engines": {

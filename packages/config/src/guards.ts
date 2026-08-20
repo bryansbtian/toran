@@ -1,9 +1,8 @@
-// SPDX-License-Identifier: MIT
 import type { RawEnv } from './schema.js';
 
 /**
  * Values shipped in `.env.example`. Toran refuses to run in production with any
- * of these still in place, because a self-hoster who copied the example file
+ * of these still in place, because a deployment that copied the example file
  * without editing it would otherwise be running with publicly known secrets.
  */
 const KNOWN_DEVELOPMENT_PLACEHOLDERS = new Set([
@@ -31,7 +30,10 @@ export function isKnownPlaceholder(value: string): boolean {
 function passwordFromDatabaseUrl(databaseUrl: string): string | null {
   try {
     const parsed = new URL(databaseUrl);
-    return parsed.password ? decodeURIComponent(parsed.password) : null;
+    if (!parsed.password) {
+      return null;
+    }
+    return decodeURIComponent(parsed.password);
   } catch {
     return null;
   }
@@ -79,6 +81,18 @@ export function collectProductionIssues(env: RawEnv): ProductionIssue[] {
   }
   if (!env.TORAN_SCANNING_ENABLED) {
     add('TORAN_SCANNING_ENABLED', 'malware scanning must not be disabled in production');
+  }
+  // Without a declared proxy the web tier has no trustworthy way to tell one
+  // caller from another: Next.js does not expose the TCP peer, and the headers
+  // that stand in for it are written by the caller. Every per-client rate limit
+  // and the anonymous upload quota then apply to one shared bucket, which is
+  // both unusable and useless. Naming the proxy is what makes them real.
+  if (env.TORAN_TRUSTED_PROXIES.length === 0) {
+    add(
+      'TORAN_TRUSTED_PROXIES',
+      'must name the reverse proxy in front of Toran; without it every client ' +
+        'shares one rate-limit bucket and one quota',
+    );
   }
   if (env.TORAN_RATE_LIMIT_BACKEND === 'memory') {
     add(

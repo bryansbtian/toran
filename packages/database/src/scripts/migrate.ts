@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: MIT
 import { loadConfig } from '@toran/config';
+import { errorMessage } from '@toran/shared';
 import { createDatabase } from '../client.js';
 import { runMigrations } from '../migrate.js';
 
@@ -17,6 +17,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error('[toran:db] migration failed:', error instanceof Error ? error.message : error);
+  console.error('[toran:db] migration failed:', errorMessage(error));
   process.exitCode = 1;
 });

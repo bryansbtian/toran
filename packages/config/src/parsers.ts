@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { z } from 'zod';
 
 /** `"true" | "1" | "yes"` -> true. Anything else falsy. Empty string uses the default. */
@@ -7,7 +6,9 @@ export const booleanFromEnv = (defaultValue: boolean) =>
     .string()
     .optional()
     .transform((raw) => {
-      if (raw === undefined || raw.trim() === '') return defaultValue;
+      if (raw === undefined || raw.trim() === '') {
+        return defaultValue;
+      }
       return ['1', 'true', 'yes', 'on'].includes(raw.trim().toLowerCase());
     });
 
@@ -15,9 +16,12 @@ export const intFromEnv = (defaultValue: number, min: number, max: number) =>
   z
     .string()
     .optional()
-    .transform((raw) =>
-      raw === undefined || raw.trim() === '' ? String(defaultValue) : raw.trim(),
-    )
+    .transform((raw) => {
+      if (raw === undefined || raw.trim() === '') {
+        return String(defaultValue);
+      }
+      return raw.trim();
+    })
     .pipe(
       z.coerce
         .number()
@@ -30,7 +34,12 @@ export const stringFromEnv = (defaultValue: string) =>
   z
     .string()
     .optional()
-    .transform((raw) => (raw === undefined || raw.trim() === '' ? defaultValue : raw.trim()));
+    .transform((raw) => {
+      if (raw === undefined || raw.trim() === '') {
+        return defaultValue;
+      }
+      return raw.trim();
+    });
 
 /** Origin without a trailing slash, e.g. `https://toran.example`. */
 export const originFromEnv = (defaultValue: string) =>
@@ -69,10 +78,11 @@ export const rateLimitFromEnv = (defaultValue: string) =>
     try {
       return parseRateLimitRule(raw);
     } catch (error) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: error instanceof Error ? error.message : 'invalid rate limit',
-      });
+      let message = 'invalid rate limit';
+      if (error instanceof Error) {
+        message = error.message;
+      }
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message });
       return z.NEVER;
     }
   });

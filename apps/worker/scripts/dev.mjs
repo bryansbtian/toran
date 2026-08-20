@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: MIT
 
 /**
  * Development runner for the worker: compile on change, and run what was
@@ -7,9 +6,9 @@
  *
  * `tsc --watch` on its own only ever produced JavaScript. Nothing executed it,
  * so scan jobs queued forever while the web app looked perfectly healthy and
- * every upload sat in `scanning` - the failure mode docs/TROUBLESHOOTING.md
- * calls "the one people miss". Pairing the compiler with `node --watch` closes
- * that gap: the compiler rewrites `dist/`, and Node restarts the process.
+ * every upload sat in `scanning` - a failure with no visible error anywhere.
+ * Pairing the compiler with `node --watch` closes that gap: the compiler
+ * rewrites `dist/`, and Node restarts the process.
  *
  * Node's watch mode ignores `node_modules`, but workspace packages resolve
  * through their symlinks to `packages/*\/dist`, so edits to a shared package
@@ -54,7 +53,9 @@ const children = new Set();
  * worker itself running after the parent is gone. `taskkill /T` walks the tree.
  */
 function stopChild(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
   if (process.platform === 'win32' && child.pid !== undefined) {
     spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore', shell: false });
     return;
@@ -76,7 +77,7 @@ function spawnChild(args, label) {
     // Turborepo reports it rather than appearing to still work.
     if (!stopping) {
       fail(`${label} exited (${signal ?? code}); stopping the worker dev session`);
-      shutdown(signal ? 0 : (code ?? 1));
+      shutdown(exitCodeFor(code, signal));
     }
   });
   return child;
@@ -85,13 +86,23 @@ function spawnChild(args, label) {
 let stopping = false;
 
 function shutdown(code) {
-  if (stopping) return;
+  if (stopping) {
+    return;
+  }
   stopping = true;
-  for (const child of children) stopChild(child);
+  for (const child of children) {
+    stopChild(child);
+  }
   process.exit(code);
 }
 
-const mtimeOf = (file) => (existsSync(file) ? statSync(file).mtimeMs : 0);
+/** 0 for a file that does not exist yet, so a first emit always reads as newer. */
+function mtimeOf(file) {
+  if (!existsSync(file)) {
+    return 0;
+  }
+  return statSync(file).mtimeMs;
+}
 
 /**
  * Waits for the compiler's first emit.
@@ -105,7 +116,9 @@ const mtimeOf = (file) => (existsSync(file) ? statSync(file).mtimeMs : 0);
 async function waitForEmit(entry, since, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (mtimeOf(entry) > since) return true;
+    if (mtimeOf(entry) > since) {
+      return true;
+    }
     await delay(150);
   }
   return false;
@@ -140,7 +153,27 @@ async function main() {
   spawnChild(['--watch', '--enable-source-maps', 'dist/main.js'], 'the worker');
 }
 
+/**
+ * A child killed by a signal is our own shutdown, not a failure. Anything else
+ * carries the child's exit code so a broken dev session is visible to the
+ * caller rather than looking like a clean stop.
+ */
+function exitCodeFor(code, signal) {
+  if (signal) {
+    return 0;
+  }
+  return code ?? 1;
+}
+
+/** Message of whatever was thrown, without assuming it was an Error. */
+function messageOf(error) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
 main().catch((error) => {
-  fail(error instanceof Error ? error.message : String(error));
+  fail(messageOf(error));
   process.exit(1);
 });

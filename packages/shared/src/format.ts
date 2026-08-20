@@ -1,11 +1,13 @@
-// SPDX-License-Identifier: MIT
-
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
 
 /** Human-readable byte count using binary multiples with decimal labels. */
 export function formatBytes(bytes: number, fractionDigits = 1): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return '-';
-  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return '-';
+  }
+  if (bytes < 1024) {
+    return `${Math.round(bytes)} B`;
+  }
   let value = bytes;
   let unit = 0;
   while (value >= 1024 && unit < UNITS.length - 1) {
@@ -32,13 +34,27 @@ export function formatRelativeTime(target: Date, now: Date = new Date()): string
   let label = 'second';
   for (const [divisor, name] of steps) {
     label = name;
-    if (remaining < divisor) break;
+    if (remaining < divisor) {
+      break;
+    }
     remaining = Math.floor(remaining / divisor);
   }
 
-  const plural = remaining === 1 ? '' : 's';
-  if (remaining === 0 && label === 'second') return past ? 'just now' : 'in a moment';
-  return past ? `${remaining} ${label}${plural} ago` : `in ${remaining} ${label}${plural}`;
+  let plural = 's';
+  if (remaining === 1) {
+    plural = '';
+  }
+
+  if (remaining === 0 && label === 'second') {
+    if (past) {
+      return 'just now';
+    }
+    return 'in a moment';
+  }
+  if (past) {
+    return `${remaining} ${label}${plural} ago`;
+  }
+  return `in ${remaining} ${label}${plural}`;
 }
 
 const EXPIRY_CHOICE_SECONDS = [
@@ -58,7 +74,10 @@ export interface ExpiryChoice {
 /** Selectable expiry presets, filtered to what this server actually allows. */
 export function expiryChoices(maxSeconds: number): ExpiryChoice[] {
   const allowed = EXPIRY_CHOICE_SECONDS.filter((choice) => choice.seconds <= maxSeconds);
-  return allowed.length > 0 ? [...allowed] : [{ seconds: maxSeconds, label: 'Maximum' }];
+  if (allowed.length > 0) {
+    return [...allowed];
+  }
+  return [{ seconds: maxSeconds, label: 'Maximum' }];
 }
 
 /** Stable, locale-independent absolute timestamp for UI and logs. */

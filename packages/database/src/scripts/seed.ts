@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: MIT
 import { loadConfig } from '@toran/config';
+import { errorMessage } from '@toran/shared';
 import { generateShareToken, hashShareToken } from '@toran/security';
 import { generateStorageKey } from '@toran/storage';
 import { createDatabase } from '../client.js';
@@ -60,6 +60,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error('[toran:db] seed failed:', error instanceof Error ? error.message : error);
+  console.error('[toran:db] seed failed:', errorMessage(error));
   process.exitCode = 1;
 });

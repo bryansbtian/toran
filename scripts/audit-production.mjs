@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: MIT
 
 /**
  * Fails when a production dependency carries a high or critical advisory that
@@ -30,8 +29,12 @@ import path from 'node:path';
  */
 function npmCommand(args) {
   const npmCli = process.env.npm_execpath;
-  if (npmCli) return [process.execPath, [npmCli, ...args]];
-  if (process.platform !== 'win32') return ['npm', args];
+  if (npmCli) {
+    return [process.execPath, [npmCli, ...args]];
+  }
+  if (process.platform !== 'win32') {
+    return ['npm', args];
+  }
   const bundled = path.join(
     path.dirname(process.execPath),
     'node_modules',
@@ -64,6 +67,14 @@ const ACCEPTED = {
       'Arbitrary file read via an attacker-controlled sourceMappingURL in a CSS comment. ' +
       'Same reachability argument: build-time only, over CSS committed to this repository.',
     revisitWhen: 'Next.js depends on postcss >= 8.5.18',
+  },
+  'GHSA-fxqj-rqcc-2cmp': {
+    package: 'postcss',
+    reason:
+      'Incomplete fix of GHSA-6g55-p6wh-862q above: an attacker-controlled sourceMappingURL ' +
+      'still reads arbitrary .map files when `from` is unset. Same reachability argument, ' +
+      'and it needs a later postcss than the other three, because 8.5.18 is still affected.',
+    revisitWhen: 'Next.js depends on postcss >= 8.5.23',
   },
   'GHSA-r28c-9q8g-f849': {
     package: 'postcss',
@@ -106,7 +117,9 @@ function advisoryIdsFor(vulnerability) {
   for (const via of vulnerability.via ?? []) {
     if (typeof via === 'object' && typeof via.url === 'string') {
       const match = /GHSA-[a-z0-9-]+/i.exec(via.url);
-      if (match) ids.add(match[0]);
+      if (match) {
+        ids.add(match[0]);
+      }
     }
   }
   return ids;
@@ -116,7 +129,9 @@ async function main() {
   const { stdout, stderr } = await runAudit();
   if (stdout.trim() === '') {
     console.error('[toran] npm audit produced no output.');
-    if (stderr) console.error(stderr);
+    if (stderr) {
+      console.error(stderr);
+    }
     return 1;
   }
 
@@ -132,13 +147,17 @@ async function main() {
   const accepted = [];
 
   for (const [name, vulnerability] of Object.entries(report.vulnerabilities ?? {})) {
-    if (!['high', 'critical'].includes(vulnerability.severity)) continue;
+    if (!['high', 'critical'].includes(vulnerability.severity)) {
+      continue;
+    }
 
     const ids = advisoryIdsFor(vulnerability);
 
     // A package flagged purely because a dependency of it is flagged carries no
     // advisory of its own; judging it separately would double-count.
-    if (ids.size === 0 && TRANSITIVE_ONLY.has(name)) continue;
+    if (ids.size === 0 && TRANSITIVE_ONLY.has(name)) {
+      continue;
+    }
 
     if (ids.size === 0) {
       unreviewed.push({ name, detail: `${vulnerability.severity} advisory with no GHSA id` });
@@ -146,8 +165,11 @@ async function main() {
     }
 
     for (const id of ids) {
-      if (ACCEPTED[id]) accepted.push({ id, name });
-      else unreviewed.push({ name, detail: `${vulnerability.severity} ${id}` });
+      if (ACCEPTED[id]) {
+        accepted.push({ id, name });
+      } else {
+        unreviewed.push({ name, detail: `${vulnerability.severity} ${id}` });
+      }
     }
   }
 

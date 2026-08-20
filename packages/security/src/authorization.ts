@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { createHmac } from 'node:crypto';
 import { constantTimeEqual } from './tokens.js';
 
@@ -31,10 +30,15 @@ export interface IssueGrantInput {
   readonly now?: Date;
 }
 
+function defaultTtlFor(purpose: GrantPurpose): number {
+  if (purpose === 'manage') {
+    return DEFAULT_MANAGE_TTL_SECONDS;
+  }
+  return DEFAULT_GRANT_TTL_SECONDS;
+}
+
 export function issueGrant(input: IssueGrantInput): string {
-  const ttl =
-    input.ttlSeconds ??
-    (input.purpose === 'manage' ? DEFAULT_MANAGE_TTL_SECONDS : DEFAULT_GRANT_TTL_SECONDS);
+  const ttl = input.ttlSeconds ?? defaultTtlFor(input.purpose);
   const expiresAt = Math.floor((input.now ?? new Date()).getTime() / 1000) + ttl;
   const payload = `${input.purpose}.${input.subject}.${expiresAt}`;
   return `${payload}.${sign(payload, input.secret)}`;
@@ -58,9 +62,13 @@ export function verifyGrant(
   grant: string | null | undefined,
   input: VerifyGrantInput,
 ): GrantVerification {
-  if (!grant || typeof grant !== 'string') return { valid: false, reason: 'malformed' };
+  if (!grant || typeof grant !== 'string') {
+    return { valid: false, reason: 'malformed' };
+  }
   const parts = grant.split('.');
-  if (parts.length !== 4) return { valid: false, reason: 'malformed' };
+  if (parts.length !== 4) {
+    return { valid: false, reason: 'malformed' };
+  }
   const [purpose, subject, expiresAtRaw, signature] = parts as [string, string, string, string];
 
   const payload = `${purpose}.${subject}.${expiresAtRaw}`;
@@ -69,11 +77,17 @@ export function verifyGrant(
   if (!constantTimeEqual(signature, sign(payload, input.secret))) {
     return { valid: false, reason: 'signature' };
   }
-  if (!constantTimeEqual(purpose, input.purpose)) return { valid: false, reason: 'purpose' };
-  if (!constantTimeEqual(subject, input.subject)) return { valid: false, reason: 'mismatch' };
+  if (!constantTimeEqual(purpose, input.purpose)) {
+    return { valid: false, reason: 'purpose' };
+  }
+  if (!constantTimeEqual(subject, input.subject)) {
+    return { valid: false, reason: 'mismatch' };
+  }
 
   const expiresAtSeconds = Number(expiresAtRaw);
-  if (!Number.isSafeInteger(expiresAtSeconds)) return { valid: false, reason: 'malformed' };
+  if (!Number.isSafeInteger(expiresAtSeconds)) {
+    return { valid: false, reason: 'malformed' };
+  }
   const expiresAt = new Date(expiresAtSeconds * 1000);
   if (expiresAt.getTime() <= (input.now ?? new Date()).getTime()) {
     return { valid: false, reason: 'expired' };
@@ -94,8 +108,8 @@ export function issueDownloadGrant(input: DownloadGrantInput): string {
     purpose: 'download',
     subject: input.shareLinkId,
     secret: input.secret,
-    ...(input.ttlSeconds === undefined ? {} : { ttlSeconds: input.ttlSeconds }),
-    ...(input.now === undefined ? {} : { now: input.now }),
+    ttlSeconds: input.ttlSeconds,
+    now: input.now,
   });
 }
 
@@ -107,7 +121,7 @@ export function verifyDownloadGrant(
     purpose: 'download',
     subject: input.shareLinkId,
     secret: input.secret,
-    ...(input.now === undefined ? {} : { now: input.now }),
+    now: input.now,
   });
 }
 

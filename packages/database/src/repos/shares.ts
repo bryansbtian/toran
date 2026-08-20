@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { ShareUnavailableReason } from '@toran/shared';
 import type { Database } from '../client.js';
@@ -27,7 +26,9 @@ export async function createShareLink(
   db: Database,
   input: CreateShareInput,
 ): Promise<ShareLinkRow> {
-  if (input.fileIds.length === 0) throw new Error('a share link needs at least one file');
+  if (input.fileIds.length === 0) {
+    throw new Error('a share link needs at least one file');
+  }
 
   // One transaction: a link with no rows in `share_link_files` would resolve to
   // nothing and could never be served, so the two writes must not come apart.
@@ -41,7 +42,9 @@ export async function createShareLink(
         maxDownloads: input.maxDownloads,
       })
       .returning();
-    if (!row) throw new Error('failed to create share link');
+    if (!row) {
+      throw new Error('failed to create share link');
+    }
 
     await tx.insert(shareLinkFiles).values(
       input.fileIds.map((fileId, position) => ({
@@ -86,13 +89,17 @@ export async function findShareByTokenHash(
     .from(shareLinks)
     .where(eq(shareLinks.tokenHash, tokenHash))
     .limit(1);
-  if (!share) return null;
+  if (!share) {
+    return null;
+  }
   return { share, files: await loadShareFiles(db, share.id) };
 }
 
 export async function findShareById(db: Database, id: string): Promise<ShareWithFiles | null> {
   const [share] = await db.select().from(shareLinks).where(eq(shareLinks.id, id)).limit(1);
-  if (!share) return null;
+  if (!share) {
+    return null;
+  }
   return { share, files: await loadShareFiles(db, share.id) };
 }
 
@@ -117,7 +124,9 @@ export type ShareEvaluation =
  * link once (revoked, expired) and otherwise report each file on its own terms.
  */
 function evaluateLink(share: ShareLinkRow, now: Date): ShareEvaluation {
-  if (share.revokedAt !== null) return { ok: false, reason: 'revoked' };
+  if (share.revokedAt !== null) {
+    return { ok: false, reason: 'revoked' };
+  }
   if (share.expiresAt !== null && share.expiresAt.getTime() <= now.getTime()) {
     return { ok: false, reason: 'expired' };
   }
@@ -138,7 +147,9 @@ export function evaluateShareFile(
   now: Date,
 ): ShareEvaluation {
   const link = evaluateLink(share, now);
-  if (!link.ok) return link;
+  if (!link.ok) {
+    return link;
+  }
 
   const { file } = entry;
   if (file.expiresAt !== null && file.expiresAt.getTime() <= now.getTime()) {
@@ -178,15 +189,21 @@ export function evaluateShareFile(
  * that file gives, so a one-file share behaves as it always did.
  */
 export function evaluateShare(input: ShareWithFiles | null, now: Date): ShareEvaluation {
-  if (!input || input.files.length === 0) return { ok: false, reason: 'not_found' };
+  if (!input || input.files.length === 0) {
+    return { ok: false, reason: 'not_found' };
+  }
 
   const link = evaluateLink(input.share, now);
-  if (!link.ok) return link;
+  if (!link.ok) {
+    return link;
+  }
 
   let first: ShareUnavailableReason | null = null;
   for (const entry of input.files) {
     const evaluation = evaluateShareFile(input.share, entry, now);
-    if (evaluation.ok) return { ok: true };
+    if (evaluation.ok) {
+      return { ok: true };
+    }
     first ??= evaluation.reason;
   }
   return { ok: false, reason: first ?? 'not_found' };
@@ -245,20 +262,28 @@ export async function reserveDownload(
     .returning();
 
   if (row) {
-    return {
-      kind: 'reserved',
-      entry: row,
-      remaining: row.maxDownloads === null ? null : row.maxDownloads - row.downloadCount,
-    };
+    let remaining: number | null = null;
+    if (row.maxDownloads !== null) {
+      remaining = row.maxDownloads - row.downloadCount;
+    }
+    return { kind: 'reserved', entry: row, remaining };
   }
 
   // Nothing matched. Re-read to report *why*, which is safe because we are no
   // longer making a decision from it.
   const current = await findShareById(db, input.shareLinkId);
   const entry = current?.files.find((candidate) => candidate.file.id === input.fileId);
-  if (!current || !entry) return { kind: 'unavailable', reason: 'not_found' };
+  if (!current || !entry) {
+    return { kind: 'unavailable', reason: 'not_found' };
+  }
   const evaluation = evaluateShareFile(current.share, entry, input.now);
-  return { kind: 'unavailable', reason: evaluation.ok ? 'not_found' : evaluation.reason };
+  if (evaluation.ok) {
+    // The re-read says the file is servable, so the UPDATE lost a race rather
+    // than hitting a rule. Reported as not_found for the same reason as every
+    // other unavailable case: the caller must not learn which one it was.
+    return { kind: 'unavailable', reason: 'not_found' };
+  }
+  return { kind: 'unavailable', reason: evaluation.reason };
 }
 
 /** Compensates a reservation when the presigned URL could not be produced. */
@@ -301,7 +326,9 @@ export async function revokeShareLink(
     .set({ revokedAt: now })
     .where(and(eq(shareLinks.id, shareLinkId), isNull(shareLinks.revokedAt)))
     .returning();
-  if (row) return row;
+  if (row) {
+    return row;
+  }
   const existing = await findShareById(db, shareLinkId);
   return existing?.share ?? null;
 }

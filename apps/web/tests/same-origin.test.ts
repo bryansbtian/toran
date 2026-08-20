@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 import { loadConfig, type ToranConfig } from '@toran/config';
 import { isToranError } from '@toran/shared';

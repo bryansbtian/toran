@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { eq, sql } from 'drizzle-orm';
 import type { RateLimitDecision, RateLimiter, RateLimitRule } from '@toran/security';
 import type { Database } from './client.js';
@@ -47,9 +46,10 @@ export class PostgresRateLimiter implements RateLimiter {
 
     const count = Number(rows[0]?.count ?? cost);
     const allowed = count <= rule.max;
-    const retryAfterSeconds = allowed
-      ? 0
-      : Math.max(1, Math.ceil((resetAt.getTime() - timestamp.getTime()) / 1000));
+    let retryAfterSeconds = 0;
+    if (!allowed) {
+      retryAfterSeconds = Math.max(1, Math.ceil((resetAt.getTime() - timestamp.getTime()) / 1000));
+    }
 
     return {
       allowed,

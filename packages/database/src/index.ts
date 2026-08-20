@@ -1,10 +1,8 @@
-// SPDX-License-Identifier: MIT
 export * from './client.js';
 export * from './ratelimit.js';
 export * from './sql-helpers.js';
 export * as schema from './schema.js';
 export {
-  abuseReports,
   downloadEvents,
   files,
   jobs,
@@ -13,7 +11,6 @@ export {
   shareLinks,
   uploadSessions,
   users,
-  type AbuseReportRow,
   type DownloadEventRow,
   type FileRow,
   type JobRow,
@@ -27,5 +24,4 @@ export * from './repos/files.js';
 export * from './repos/shares.js';
 export * from './repos/jobs.js';
 export * from './repos/maintenance.js';
-export * from './repos/reports.js';
 export { runMigrations } from './migrate.js';

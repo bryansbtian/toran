@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { config as loadDotenv } from 'dotenv';
@@ -28,7 +27,6 @@ export interface ToranConfig {
     readonly secretKey: string;
     readonly secureCookies: boolean;
     readonly trustedProxies: readonly string[];
-    readonly abuseContactEmail: string;
     readonly maxRequestBodyBytes: number;
     readonly requestTimeoutMs: number;
   };
@@ -69,8 +67,8 @@ export interface ToranConfig {
     readonly uploadCreate: RateLimitRule;
     readonly uploadComplete: RateLimitRule;
     readonly download: RateLimitRule;
+    readonly lookup: RateLimitRule;
     readonly password: RateLimitRule;
-    readonly report: RateLimitRule;
   };
 
   readonly scanning: {
@@ -99,6 +97,17 @@ export interface ToranConfig {
   };
 }
 
+/**
+ * An empty endpoint means "use the provider default", which the AWS SDK spells
+ * as an absent value rather than an empty string.
+ */
+function omitWhenEmpty(value: string): string | undefined {
+  if (value === '') {
+    return undefined;
+  }
+  return value;
+}
+
 function assemble(raw: RawEnv): ToranConfig {
   const env = raw.NODE_ENV;
   return {
@@ -113,15 +122,14 @@ function assemble(raw: RawEnv): ToranConfig {
       secretKey: raw.TORAN_SECRET_KEY,
       secureCookies: raw.TORAN_SECURE_COOKIES,
       trustedProxies: raw.TORAN_TRUSTED_PROXIES,
-      abuseContactEmail: raw.TORAN_ABUSE_CONTACT_EMAIL,
       maxRequestBodyBytes: raw.TORAN_MAX_REQUEST_BODY_BYTES,
       requestTimeoutMs: raw.TORAN_REQUEST_TIMEOUT_MS,
     },
     log: { level: raw.TORAN_LOG_LEVEL },
     database: { url: raw.DATABASE_URL, poolMax: raw.DATABASE_POOL_MAX },
     storage: {
-      endpoint: raw.S3_ENDPOINT === '' ? undefined : raw.S3_ENDPOINT,
-      publicEndpoint: raw.S3_PUBLIC_ENDPOINT === '' ? undefined : raw.S3_PUBLIC_ENDPOINT,
+      endpoint: omitWhenEmpty(raw.S3_ENDPOINT),
+      publicEndpoint: omitWhenEmpty(raw.S3_PUBLIC_ENDPOINT),
       region: raw.S3_REGION,
       bucket: raw.S3_BUCKET,
       accessKeyId: raw.S3_ACCESS_KEY_ID,
@@ -144,8 +152,8 @@ function assemble(raw: RawEnv): ToranConfig {
       uploadCreate: raw.TORAN_RATE_LIMIT_UPLOAD_CREATE,
       uploadComplete: raw.TORAN_RATE_LIMIT_UPLOAD_COMPLETE,
       download: raw.TORAN_RATE_LIMIT_DOWNLOAD,
+      lookup: raw.TORAN_RATE_LIMIT_LOOKUP,
       password: raw.TORAN_RATE_LIMIT_PASSWORD,
-      report: raw.TORAN_RATE_LIMIT_REPORT,
     },
     scanning: {
       enabled: raw.TORAN_SCANNING_ENABLED,
@@ -192,9 +200,13 @@ function findDotenvFile(startDirectory: string): string | undefined {
   let directory = path.resolve(startDirectory);
   for (let depth = 0; depth < 8; depth += 1) {
     const candidate = path.join(directory, '.env');
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(candidate)) {
+      return candidate;
+    }
     const parent = path.dirname(directory);
-    if (parent === directory) break;
+    if (parent === directory) {
+      break;
+    }
     directory = parent;
   }
   return undefined;
@@ -208,8 +220,14 @@ export function loadConfig(options: LoadConfigOptions = {}): ToranConfig {
   const warn = options.onWarning ?? ((message: string) => console.warn(message));
 
   if (!options.source && !options.skipDotenv && !dotenvLoaded) {
+    // Passed as an absent key rather than `path: undefined`, which dotenv would
+    // treat as an explicit instruction to load nothing.
     const envFile = findDotenvFile(process.cwd());
-    loadDotenv({ quiet: true, ...(envFile ? { path: envFile } : {}) });
+    const dotenvOptions: { quiet: boolean; path?: string } = { quiet: true };
+    if (envFile) {
+      dotenvOptions.path = envFile;
+    }
+    loadDotenv(dotenvOptions);
     dotenvLoaded = true;
   }
 
@@ -226,14 +244,18 @@ export function loadConfig(options: LoadConfigOptions = {}): ToranConfig {
 
   const raw = parsed.data;
   const fatal = collectUniversalIssues(raw);
-  if (fatal.length > 0) throw new ConfigurationError(fatal);
+  if (fatal.length > 0) {
+    throw new ConfigurationError(fatal);
+  }
 
   // Production fails closed, unconditionally. There is deliberately no flag
   // that turns these into warnings: an operator who could set one would set it
   // exactly when the checks were about to do their job.
   if (raw.NODE_ENV === 'production') {
     const issues = collectProductionIssues(raw);
-    if (issues.length > 0) throw new ConfigurationError(issues);
+    if (issues.length > 0) {
+      throw new ConfigurationError(issues);
+    }
   }
 
   if (!raw.TORAN_SCANNING_ENABLED) {

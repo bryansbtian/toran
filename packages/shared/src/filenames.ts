@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: MIT
-
 export const MAX_FILENAME_LENGTH = 200;
 
 export type FilenameRejection =
@@ -67,7 +65,10 @@ export function normalizeFilename(input: string): NormalizeFilenameResult {
 
   // A name consisting only of dots would still resolve to a directory entry.
   if (value === '' || /^\.+$/.test(value)) {
-    return { ok: false, reason: value === '' ? 'NO_USABLE_CHARACTERS' : 'PATH_COMPONENT' };
+    if (value === '') {
+      return { ok: false, reason: 'NO_USABLE_CHARACTERS' };
+    }
+    return { ok: false, reason: 'PATH_COMPONENT' };
   }
 
   // Leading dots are stripped so uploads cannot masquerade as dotfiles.
@@ -79,9 +80,15 @@ export function normalizeFilename(input: string): NormalizeFilenameResult {
     return { ok: false, reason: 'NO_USABLE_CHARACTERS' };
   }
 
+  // A dot at index 0 is not an extension separator: leading dots were already
+  // stripped above, so index 0 could only mean the whole name is the extension.
   const extensionIndex = value.lastIndexOf('.');
-  const stem = extensionIndex > 0 ? value.slice(0, extensionIndex) : value;
-  const extension = extensionIndex > 0 ? value.slice(extensionIndex) : '';
+  let stem = value;
+  let extension = '';
+  if (extensionIndex > 0) {
+    stem = value.slice(0, extensionIndex);
+    extension = value.slice(extensionIndex);
+  }
 
   if (RESERVED_BASENAMES.has(stem.toLowerCase())) {
     return { ok: false, reason: 'RESERVED' };
@@ -113,7 +120,9 @@ export function contentDispositionAttachment(filename: string): string {
 /** Lowercase extension including the dot, or `''`. */
 export function extensionOf(filename: string): string {
   const index = filename.lastIndexOf('.');
-  if (index <= 0 || index === filename.length - 1) return '';
+  if (index <= 0 || index === filename.length - 1) {
+    return '';
+  }
   return filename.slice(index).toLowerCase();
 }
 

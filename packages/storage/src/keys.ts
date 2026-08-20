@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { randomBytes } from 'node:crypto';
 
 export const OBJECT_PREFIX = 'objects';

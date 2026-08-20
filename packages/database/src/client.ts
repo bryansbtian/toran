@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from './schema.js';
@@ -21,13 +20,20 @@ export interface DatabaseHandle {
 }
 
 export function createDatabase(options: CreateDatabaseOptions): DatabaseHandle {
+  // Built as an absent key rather than `ssl: undefined`, which postgres.js
+  // reads as an explicit "no TLS" instead of falling back to its own default.
+  const tls: { ssl?: CreateDatabaseOptions['ssl'] } = {};
+  if (options.ssl !== undefined) {
+    tls.ssl = options.ssl;
+  }
+
   const sql = postgres(options.url, {
     max: options.poolMax ?? 10,
     // Toran maps every timestamp itself; disabling prepared statements keeps
     // the client compatible with transaction-mode connection poolers such as
     // PgBouncer, which many managed Postgres providers put in front of the DB.
     prepare: false,
-    ...(options.ssl === undefined ? {} : { ssl: options.ssl }),
+    ...tls,
     onnotice: options.onNotice ?? (() => {}),
   });
 

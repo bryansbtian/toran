@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import type { ButtonHTMLAttributes, HTMLAttributes, JSX, ReactNode } from 'react';
 import clsx from 'clsx';
 
@@ -53,7 +52,7 @@ export function Button({
       )}
       {...rest}
     >
-      {loading ? <Spinner /> : null}
+      {loading && <Spinner />}
       {children}
     </button>
   );
@@ -135,13 +134,17 @@ export function Alert({
   readonly title?: string;
   readonly children: ReactNode;
 }): JSX.Element {
+  // A danger alert interrupts the screen reader; every other tone is announced
+  // politely when the user next reaches it.
+  let role = 'status';
+  if (tone === 'danger') {
+    role = 'alert';
+  }
+
   return (
-    <div
-      role={tone === 'danger' ? 'alert' : 'status'}
-      className={clsx('rounded-lg border px-4 py-3 text-sm', TONES[tone])}
-    >
-      {title ? <p className="font-semibold">{title}</p> : null}
-      <div className={title ? 'mt-1' : undefined}>{children}</div>
+    <div role={role} className={clsx('rounded-lg border px-4 py-3 text-sm', TONES[tone])}>
+      {title && <p className="font-semibold">{title}</p>}
+      <div className={clsx(title && 'mt-1')}>{children}</div>
     </div>
   );
 }
@@ -159,24 +162,30 @@ export function Field({
   readonly error?: string;
   readonly children: ReactNode;
 }): JSX.Element {
-  const hintId = hint ? `${htmlFor}-hint` : undefined;
-  const errorId = error ? `${htmlFor}-error` : undefined;
+  let hintId: string | undefined;
+  if (hint) {
+    hintId = `${htmlFor}-hint`;
+  }
+  let errorId: string | undefined;
+  if (error) {
+    errorId = `${htmlFor}-error`;
+  }
   return (
     <div className="space-y-1.5">
       <label htmlFor={htmlFor} className="block text-sm font-medium text-ink">
         {label}
       </label>
       {children}
-      {hint ? (
+      {hint && (
         <p id={hintId} className="text-xs text-ink-muted">
           {hint}
         </p>
-      ) : null}
-      {error ? (
+      )}
+      {error && (
         <p id={errorId} className="text-xs font-medium text-danger-700" role="alert">
           {error}
         </p>
-      ) : null}
+      )}
     </div>
   );
 }
@@ -186,6 +195,21 @@ export const inputClassName = clsx(
   'placeholder:text-ink-subtle',
   FOCUS_RING,
 );
+
+/**
+ * Selects, with the native drop-down arrow replaced by one that sits inside the
+ * field rather than flush against its edge. Browsers pin the built-in arrow to
+ * the right edge regardless of padding, so the only way to inset it is to turn
+ * the native appearance off; `.toran-select` in `globals.css` draws the
+ * replacement and keeps it legible in both themes.
+ */
+export const selectClassName = clsx(inputClassName, 'toran-select');
+
+/**
+ * Textareas. `min-h` matches the height the field opens at, so the drag handle
+ * can grow the box but never shrink it below what was there to begin with.
+ */
+export const textareaClassName = clsx(inputClassName, 'min-h-[9rem] resize-y');
 
 export function ProgressBar({
   value,

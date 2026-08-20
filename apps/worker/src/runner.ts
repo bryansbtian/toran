@@ -1,8 +1,7 @@
-// SPDX-License-Identifier: MIT
 import { randomBytes } from 'node:crypto';
 import { claimJobs, completeJob, failJob, reclaimExpiredLocks, type JobRow } from '@toran/database';
 import { metrics, withSpan } from '@toran/observability';
-import type { JobType } from '@toran/shared';
+import { asError, errorMessage, type JobType } from '@toran/shared';
 import { PermanentJobError, type JobContext, type JobHandler } from './jobs/types.js';
 
 export interface RunnerOptions {
@@ -36,7 +35,9 @@ export class JobRunner {
 
   constructor(private readonly options: RunnerOptions) {
     this.workerId = options.workerId ?? `worker-${randomBytes(6).toString('hex')}`;
-    for (const handler of options.handlers) this.handlers.set(handler.type, handler);
+    for (const handler of options.handlers) {
+      this.handlers.set(handler.type, handler);
+    }
   }
 
   /** Runs one polling tick. Exposed so integration tests can step the queue. */
@@ -62,9 +63,13 @@ export class JobRunner {
     await Promise.all(
       claimed.map(async (job) => {
         const outcome = await this.execute(job);
-        if (outcome === 'succeeded') stats.succeeded += 1;
-        else if (outcome === 'retried') stats.retried += 1;
-        else stats.failed += 1;
+        if (outcome === 'succeeded') {
+          stats.succeeded += 1;
+        } else if (outcome === 'retried') {
+          stats.retried += 1;
+        } else {
+          stats.failed += 1;
+        }
       }),
     );
 
@@ -119,31 +124,45 @@ export class JobRunner {
       log.info({ durationMs, ...(outcome.summary ?? {}) }, 'job completed');
       return 'succeeded';
     } catch (error) {
+      // A permanent failure is one the payload itself guarantees will fail
+      // again, so it is buried rather than retried until the attempt budget runs
+      // out against a queue that could be doing real work.
       const permanent = error instanceof PermanentJobError;
       const result = await failJob(context.db, {
         jobId: job.id,
-        error: error instanceof Error ? error.message : 'unknown job failure',
+        error: errorMessage(error, 'unknown job failure'),
         now: context.clock.now(),
         retryable: !permanent,
       });
 
+      let errorCategory = 'TRANSIENT';
+      if (permanent) {
+        errorCategory = 'PERMANENT';
+      }
+
       metrics.record('toran.job.failed', 1, { type: job.type, permanent });
       log.error(
         {
-          errorCategory: permanent ? 'PERMANENT' : 'TRANSIENT',
+          errorCategory,
           durationMs: Date.now() - startedAt,
           willRetry: result.retrying,
-          err: error instanceof Error ? error : undefined,
+          err: asError(error),
         },
         'job failed',
       );
-      return result.retrying ? 'retried' : 'failed';
+
+      if (result.retrying) {
+        return 'retried';
+      }
+      return 'failed';
     }
   }
 
   /** Polls until {@link stop} is called. */
   async start(): Promise<void> {
-    if (this.running) return;
+    if (this.running) {
+      return;
+    }
     this.running = true;
     this.stopping = false;
     const { context } = this.options;
@@ -161,7 +180,9 @@ export class JobRunner {
       } finally {
         this.inFlight.delete(tick);
       }
-      if (this.stopping) break;
+      if (this.stopping) {
+        break;
+      }
       await this.sleep(context.config.worker.pollIntervalMs);
     }
 
@@ -176,7 +197,7 @@ export class JobRunner {
       // A failure to reach the database must not kill the loop; the next tick
       // retries after the poll interval.
       this.options.context.logger.error(
-        { workerId: this.workerId, err: error instanceof Error ? error : undefined },
+        { workerId: this.workerId, err: asError(error) },
         'worker tick failed',
       );
     }

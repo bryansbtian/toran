@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: MIT
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Moon, Sun } from 'lucide-react';
 
 type Theme = 'light' | 'dark';
 
@@ -12,11 +12,20 @@ export function ThemeToggle() {
   // so the button label matches what is actually rendered.
   useEffect(() => {
     const current = document.documentElement.getAttribute('data-theme');
-    setTheme(current === 'dark' ? 'dark' : 'light');
+    // Anything other than an explicit "dark" is light, including the attribute
+    // being absent, which is what ThemeScript leaves for the default theme.
+    let applied: Theme = 'light';
+    if (current === 'dark') {
+      applied = 'dark';
+    }
+    setTheme(applied);
   }, []);
 
   const toggle = () => {
-    const next: Theme = theme === 'dark' ? 'light' : 'dark';
+    let next: Theme = 'dark';
+    if (theme === 'dark') {
+      next = 'light';
+    }
     setTheme(next);
     document.documentElement.setAttribute('data-theme', next);
     try {
@@ -26,14 +35,24 @@ export function ThemeToggle() {
     }
   };
 
+  const isDark = theme === 'dark';
+
+  // The control offers the theme you would switch to, so the icon and the label
+  // are both the opposite of what is currently applied.
+  let label = 'Switch to dark theme';
+  if (isDark) {
+    label = 'Switch to light theme';
+  }
+
   return (
     <button
       type="button"
       onClick={toggle}
-      aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-      className="rounded-lg px-3 py-2 text-sm font-medium text-ink-muted hover:bg-surface-sunken hover:text-ink"
+      aria-label={label}
+      className="rounded-lg px-3 py-2 text-ink-muted transition-colors hover:bg-surface-sunken hover:text-ink"
     >
-      <span aria-hidden="true">{theme === 'dark' ? '☀' : '☾'}</span>
+      {isDark && <Sun className="h-5 w-5" aria-hidden="true" />}
+      {!isDark && <Moon className="h-5 w-5" aria-hidden="true" />}
     </button>
   );
 }

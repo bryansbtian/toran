@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { createShareRequestSchema } from '@toran/shared';
 import { assertSameOrigin, enforceRateLimit, handler, json, readJson } from '@/server/http';
 import { createShare } from '@/server/uploads';
@@ -24,9 +23,9 @@ export const POST = handler('POST /api/shares', async (request, context) => {
   const result = await createShare(context, {
     fileIds: body.fileIds,
     manageKeys: body.manageKeys,
-    ...(body.expiresInSeconds !== undefined ? { expiresInSeconds: body.expiresInSeconds } : {}),
-    ...(body.password !== undefined ? { password: body.password } : {}),
-    ...(body.maxDownloads !== undefined ? { maxDownloads: body.maxDownloads } : {}),
+    expiresInSeconds: body.expiresInSeconds,
+    password: body.password,
+    maxDownloads: body.maxDownloads,
   });
 
   return json(result, context, { status: 201 });

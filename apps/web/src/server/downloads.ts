@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import 'server-only';
 import {
   ToranError,
@@ -88,8 +87,13 @@ export function toPublicView(
   const { share } = found;
   const scanning = !evaluation.ok && evaluation.reason === 'scanning';
 
+  let status: 'scanning' | 'ready' = 'ready';
+  if (scanning) {
+    status = 'scanning';
+  }
+
   return {
-    status: scanning ? 'scanning' : 'ready',
+    status,
     passwordProtected: share.passwordHash !== null,
     authorized: share.passwordHash === null || authorized,
     expiresAt: share.expiresAt?.toISOString() ?? null,
@@ -100,17 +104,29 @@ export function toPublicView(
   };
 }
 
+function remainingFor(maxDownloads: number | null, downloadCount: number): number | null {
+  if (maxDownloads === null) {
+    return null;
+  }
+  return Math.max(0, maxDownloads - downloadCount);
+}
+
 function toPublicFile(
   share: ShareWithFiles['share'],
   entry: ShareFile,
   now: Date,
 ): PublicShareFile {
   const evaluation = evaluateShareFile(share, entry, now);
-  const status = evaluation.ok
-    ? 'ready'
-    : evaluation.reason === 'scanning'
-      ? 'scanning'
-      : 'unavailable';
+
+  // "unavailable" deliberately absorbs revoked, expired, exhausted, blocked and
+  // deleted alike, so the response cannot be used to tell them apart.
+  let status: PublicShareFile['status'] = 'unavailable';
+  if (evaluation.ok) {
+    status = 'ready';
+  } else if (evaluation.reason === 'scanning') {
+    status = 'scanning';
+  }
+
   const { maxDownloads, downloadCount } = entry.entry;
   return {
     fileId: entry.file.id,
@@ -119,14 +135,16 @@ function toPublicFile(
     filename: entry.file.normalizedFilename,
     size: entry.file.actualSize ?? entry.file.declaredSize,
     status,
-    remainingDownloads: maxDownloads === null ? null : Math.max(0, maxDownloads - downloadCount),
+    remainingDownloads: remainingFor(maxDownloads, downloadCount),
   };
 }
 
 /** Detailed reason, for the endpoints that are allowed to report one. */
 export function unavailabilityError(found: ShareWithFiles | null, now: Date): ToranError | null {
   const evaluation = evaluateShare(found, now);
-  if (evaluation.ok) return null;
+  if (evaluation.ok) {
+    return null;
+  }
   return new ToranError(REASON_TO_CODE[evaluation.reason]);
 }
 
@@ -139,7 +157,9 @@ export function isAuthorized(
   share: { readonly id: string; readonly passwordHash: string | null },
   cookieValue: string | null | undefined,
 ): boolean {
-  if (share.passwordHash === null) return true;
+  if (share.passwordHash === null) {
+    return true;
+  }
   return verifyDownloadGrant(cookieValue, {
     shareLinkId: share.id,
     secret: context.config.app.secretKey,
@@ -250,7 +270,9 @@ export async function issueDownload(
   const found = await lookupShare(context, input.token);
 
   const unavailable = unavailabilityError(found, now);
-  if (!found || unavailable) throw unavailable ?? new ToranError('NOT_FOUND');
+  if (!found || unavailable) {
+    throw unavailable ?? new ToranError('NOT_FOUND');
+  }
 
   if (!isAuthorized(context, found.share, input.grantCookie)) {
     throw new ToranError('PASSWORD_REQUIRED');
@@ -260,7 +282,9 @@ export async function issueDownload(
   // Report the file's own reason rather than the link's: with several files the
   // link can be perfectly usable while this one is scanning or exhausted.
   const fileEvaluation = evaluateShareFile(found.share, target, now);
-  if (!fileEvaluation.ok) throw new ToranError(REASON_TO_CODE[fileEvaluation.reason]);
+  if (!fileEvaluation.ok) {
+    throw new ToranError(REASON_TO_CODE[fileEvaluation.reason]);
+  }
 
   const reservation = await reserveDownload(context.db, {
     shareLinkId: found.share.id,
@@ -288,10 +312,13 @@ export async function issueDownload(
       { shareLinkId: found.share.id, fileId: target.file.id, err: error },
       'failed to sign download url; reservation released',
     );
-    throw new ToranError(
-      error instanceof StorageError && error.retryable ? 'STORAGE_UNAVAILABLE' : 'INTERNAL_ERROR',
-      { cause: error },
-    );
+    // A retryable storage fault is the client's cue to try again; anything
+    // else is ours to fix and says nothing useful to the caller.
+    let code: ErrorCode = 'INTERNAL_ERROR';
+    if (error instanceof StorageError && error.retryable) {
+      code = 'STORAGE_UNAVAILABLE';
+    }
+    throw new ToranError(code, { cause: error });
   }
 
   // Recorded after the URL exists so a failed signing does not create a
@@ -338,10 +365,14 @@ function selectFile(found: ShareWithFiles, fileId: string | undefined): ShareFil
   if (fileId === undefined) {
     const [only] = found.files;
     // Naming no file is unambiguous only when the link serves exactly one.
-    if (found.files.length !== 1 || !only) throw new ToranError('VALIDATION_FAILED');
+    if (found.files.length !== 1 || !only) {
+      throw new ToranError('VALIDATION_FAILED');
+    }
     return only;
   }
   const match = found.files.find((entry) => entry.file.id === fileId);
-  if (!match) throw new ToranError('NOT_FOUND');
+  if (!match) {
+    throw new ToranError('NOT_FOUND');
+  }
   return match;
 }

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 import { backoffDelaySeconds, fixedClock, isExpired, resolveExpiry, secondsUntil } from './time.js';
 
@@ -10,7 +9,9 @@ describe('resolveExpiry', () => {
   it('uses the server default when nothing is requested', () => {
     const result = resolveExpiry({ ...policy }, clock);
     expect(result.ok).toBe(true);
-    if (!result.ok) return;
+    if (!result.ok) {
+      return;
+    }
     expect(result.seconds).toBe(86_400);
     expect(result.expiresAt.toISOString()).toBe('2026-07-26T12:00:00.000Z');
   });

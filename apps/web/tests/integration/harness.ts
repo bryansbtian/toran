@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { loadConfig, type ToranConfig } from '@toran/config';
 import { createTestDatabase, type TestDatabase } from '@toran/database/testing';
 import { createNullLogger } from '@toran/observability';

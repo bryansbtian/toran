@@ -1,14 +1,13 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: MIT
 
 /**
  * Fails when something that looks like a credential is committed.
  *
  * This is a backstop, not a substitute for GitHub's push protection and
- * secret scanning (see SECURITY.md). It deliberately allows the documented
- * placeholder values in `.env.example`, because those exist precisely so a
- * self-hoster can see what to replace - and `@toran/config` refuses to boot in
- * production if any of them survive.
+ * secret scanning (see .github/SECURITY.md). It deliberately allows the
+ * documented placeholder values in `.env.example`, because those exist
+ * precisely to show what needs replacing - and `@toran/config` refuses to boot
+ * in production if any of them survive.
  */
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -73,7 +72,9 @@ const FORBIDDEN_FILES = ['.env', '.env.local', '.env.production', '.env.producti
 async function* walk(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     if (entry.isDirectory()) {
-      if (SKIP_DIRECTORIES.has(entry.name)) continue;
+      if (SKIP_DIRECTORIES.has(entry.name)) {
+        continue;
+      }
       yield* walk(path.join(directory, entry.name));
       continue;
     }
@@ -103,10 +104,18 @@ async function main() {
     const relative = path.relative(root, file).split(path.sep).join('/');
     const base = path.basename(file);
 
-    if (base === 'package-lock.json') continue;
-    if (base === 'check-secrets.mjs') continue;
-    if (PLACEHOLDER_FILES.has(base)) continue;
-    if (!SCANNED_EXTENSIONS.has(path.extname(file)) && !base.startsWith('.env')) continue;
+    if (base === 'package-lock.json') {
+      continue;
+    }
+    if (base === 'check-secrets.mjs') {
+      continue;
+    }
+    if (PLACEHOLDER_FILES.has(base)) {
+      continue;
+    }
+    if (!SCANNED_EXTENSIONS.has(path.extname(file)) && !base.startsWith('.env')) {
+      continue;
+    }
 
     let contents;
     try {

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { createHmac } from 'node:crypto';
 
 /**
@@ -15,7 +14,8 @@ import { createHmac } from 'node:crypto';
  * realistic traffic volumes while shrinking what a database leak reveals.
  *
  * Trade-off: because the identifier rotates, per-identifier quotas reset at
- * each rotation boundary. `docs/PRIVACY.md` documents this.
+ * each rotation boundary. That is deliberate: a quota that outlived rotation
+ * would need a durable identifier, which is the thing this avoids.
  */
 export const IDENTIFIER_LENGTH = 16;
 export const DEFAULT_ROTATION_SECONDS = 86_400;
@@ -53,26 +53,55 @@ export function anonymousIdentifier(
  */
 export function normalizeIpAddress(ipAddress: string): string {
   const value = ipAddress.trim().toLowerCase();
-  if (value === '') return 'unknown';
+  if (value === '') {
+    return 'unknown';
+  }
   const withoutZone = value.split('%')[0] ?? value;
-  const unmapped = withoutZone.startsWith('::ffff:') ? withoutZone.slice(7) : withoutZone;
+
+  // An IPv4-mapped IPv6 address is the same host as the plain IPv4 form, so it
+  // has to normalise to one value or the two spellings get separate quotas.
+  let unmapped = withoutZone;
+  if (withoutZone.startsWith('::ffff:')) {
+    unmapped = withoutZone.slice(7);
+  }
+
   if (unmapped.includes(':')) {
     const groups = expandIpv6(unmapped);
-    return groups ? `${groups.slice(0, 4).join(':')}::/64` : 'unknown';
+    if (!groups) {
+      return 'unknown';
+    }
+    return `${groups.slice(0, 4).join(':')}::/64`;
   }
-  return /^\d{1,3}(\.\d{1,3}){3}$/.test(unmapped) ? unmapped : 'unknown';
+
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(unmapped)) {
+    return 'unknown';
+  }
+  return unmapped;
+}
+
+/** Splits one side of a `::` elision. An empty side contributes no groups. */
+function ipv6Groups(side: string | undefined): string[] {
+  if (side === undefined || side === '') {
+    return [];
+  }
+  return side.split(':');
 }
 
 function expandIpv6(address: string): string[] | null {
   const [head, tail] = address.split('::');
-  const headGroups = head === '' || head === undefined ? [] : head.split(':');
-  const tailGroups = tail === undefined || tail === '' ? [] : tail.split(':');
+  const headGroups = ipv6Groups(head);
+  const tailGroups = ipv6Groups(tail);
   if (address.includes('::')) {
     const fill = 8 - headGroups.length - tailGroups.length;
-    if (fill < 0) return null;
+    if (fill < 0) {
+      return null;
+    }
     return [...headGroups, ...Array<string>(fill).fill('0'), ...tailGroups];
   }
-  return headGroups.length === 8 ? headGroups : null;
+  if (headGroups.length !== 8) {
+    return null;
+  }
+  return headGroups;
 }
 
 /**
@@ -81,7 +110,9 @@ function expandIpv6(address: string): string[] | null {
  * administrator needs to triage abuse.
  */
 export function sanitizeUserAgent(userAgent: string | null | undefined, maxLength = 120): string {
-  if (!userAgent) return '';
+  if (!userAgent) {
+    return '';
+  }
   return userAgent
     .replace(/[^ -~]/g, '')
     .replace(/\s+/g, ' ')
@@ -110,39 +141,58 @@ export function resolveClientIp(input: {
   // Right-most untrusted entry is the closest address the proxy chain vouches for.
   for (let index = forwarded.length - 1; index >= 0; index -= 1) {
     const candidate = forwarded[index] ?? '';
-    if (!isTrustedPeer(candidate, input.trustedProxies)) return candidate;
+    if (!isTrustedPeer(candidate, input.trustedProxies)) {
+      return candidate;
+    }
   }
   return peer || 'unknown';
 }
 
 function isTrustedPeer(address: string, trusted: readonly string[]): boolean {
-  if (address === '') return false;
-  return trusted.some((entry) =>
-    entry.includes('/') ? ipInCidr(address, entry) : entry === address,
-  );
+  if (address === '') {
+    return false;
+  }
+  return trusted.some((entry) => {
+    if (entry.includes('/')) {
+      return ipInCidr(address, entry);
+    }
+    return entry === address;
+  });
 }
 
 /** IPv4-only CIDR containment. IPv6 proxies must be listed as exact addresses. */
 export function ipInCidr(address: string, cidr: string): boolean {
   const [network, prefixRaw] = cidr.split('/');
   const prefix = Number(prefixRaw);
-  if (!network || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) return false;
+  if (!network || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) {
+    return false;
+  }
   const target = ipv4ToInt(address);
   const base = ipv4ToInt(network);
-  if (target === null || base === null) return false;
-  if (prefix === 0) return true;
+  if (target === null || base === null) {
+    return false;
+  }
+  if (prefix === 0) {
+    return true;
+  }
   const mask = (0xffffffff << (32 - prefix)) >>> 0;
   return (target & mask) >>> 0 === (base & mask) >>> 0;
 }
 
 function ipv4ToInt(address: string): number | null {
   const parts = address.split('.');
-  if (parts.length !== 4) return null;
+  if (parts.length !== 4) {
+    return null;
+  }
   let value = 0;
   for (const part of parts) {
-    if (!/^\d{1,3}$/.test(part)) return null;
+    if (!/^\d{1,3}$/.test(part)) {
+      return null;
+    }
     const octet = Number(part);
-    if (octet > 255) return null;
+    if (octet > 255) {
+      return null;
+    }
     value = (value << 8) | octet;
   }
   return value >>> 0;

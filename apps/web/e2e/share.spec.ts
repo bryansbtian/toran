@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,7 +29,9 @@ test.describe('Toran share lifecycle', () => {
       expect(file.suggestedFilename()).toBe('report.txt');
       const stream = await file.createReadStream();
       const chunks: Buffer[] = [];
-      for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+      for await (const chunk of stream) {
+        chunks.push(Buffer.from(chunk));
+      }
       expect(Buffer.concat(chunks).toString()).toBe(contents);
     } finally {
       await visitor.close();
@@ -56,7 +57,7 @@ test.describe('Toran share lifecycle', () => {
     const visitorPage = await visitor.newPage();
     try {
       await waitForReady(visitorPage, shareUrl, 3);
-      await expect(visitorPage.getByRole('heading', { name: '3 files' })).toBeVisible();
+      await expect(visitorPage.getByRole('heading', { name: '3 Files' })).toBeVisible();
 
       // Taking only the middle one must fetch that file, not the first.
       const download = visitorPage.waitForEvent('download', { timeout: 45_000 });
@@ -66,7 +67,9 @@ test.describe('Toran share lifecycle', () => {
       expect(file.suggestedFilename()).toBe('beta.txt');
       const stream = await file.createReadStream();
       const chunks: Buffer[] = [];
-      for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+      for await (const chunk of stream) {
+        chunks.push(Buffer.from(chunk));
+      }
       expect(Buffer.concat(chunks).toString()).toBe(`beta ${stamp}`);
 
       // The others are still offered: one download did not consume the link.
@@ -109,7 +112,7 @@ test.describe('Toran share lifecycle', () => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const shareUrl = await uploadFile(page, { filename: 'copy-me.txt' });
 
-    await page.getByRole('button', { name: 'Copy link' }).click();
+    await page.getByRole('button', { name: 'Copy Link' }).click();
     await expect(page.getByText('Link copied to your clipboard.')).toBeVisible();
 
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
@@ -126,7 +129,7 @@ test.describe('Toran share lifecycle', () => {
     const visitorPage = await visitor.newPage();
     try {
       await visitorPage.goto(shareUrl);
-      await expect(visitorPage.getByRole('heading', { name: 'Password required' })).toBeVisible({
+      await expect(visitorPage.getByRole('heading', { name: 'Password Required' })).toBeVisible({
         timeout: 60_000,
       });
       // The filename must not leak before authorisation.
@@ -167,7 +170,7 @@ test.describe('Toran share lifecycle', () => {
     try {
       await secondPage.goto(shareUrl);
       await expect(
-        secondPage.getByRole('heading', { name: "This link isn't available" }),
+        secondPage.getByRole('heading', { name: "This Link Isn't Available" }),
       ).toBeVisible({ timeout: 30_000 });
     } finally {
       await second.close();
@@ -187,7 +190,7 @@ test.describe('Toran share lifecycle', () => {
     try {
       await visitorPage.goto(shareUrl);
       await expect(
-        visitorPage.getByRole('heading', { name: "This link isn't available" }),
+        visitorPage.getByRole('heading', { name: "This Link Isn't Available" }),
       ).toBeVisible({ timeout: 30_000 });
     } finally {
       await visitor.close();
@@ -196,7 +199,7 @@ test.describe('Toran share lifecycle', () => {
 
   test('an unknown token is indistinguishable from a revoked one', async ({ page }) => {
     await page.goto('/s/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
-    await expect(page.getByRole('heading', { name: "This link isn't available" })).toBeVisible({
+    await expect(page.getByRole('heading', { name: "This Link Isn't Available" })).toBeVisible({
       timeout: 30_000,
     });
   });
@@ -216,7 +219,7 @@ test.describe('Toran share lifecycle', () => {
     await page.locator('input[type="file"]').setInputFiles(oversizedPath);
 
     await expect(page.getByText(/This server accepts files up to/)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Create share link' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Create Share Link' })).toBeDisabled();
 
     await fs.unlink(oversizedPath).catch(() => {});
   });
@@ -233,23 +236,56 @@ test.describe('Toran share lifecycle', () => {
 
   test('creating another link resets the form', async ({ page }) => {
     await uploadFile(page, { filename: 'first.txt' });
-    await page.getByRole('button', { name: 'Create another link' }).click();
-    await expect(page.getByRole('heading', { name: 'Share a file' })).toBeVisible();
+    await page.getByRole('button', { name: 'Create Another Link' }).click();
+    await expect(page.getByRole('heading', { name: 'Share a File' })).toBeVisible();
     await expect(page.getByTestId('selected-file')).toHaveCount(0);
+    // Starting over drops the link from the address bar too, or reloading would
+    // walk straight back into the link the user just left.
+    await expect(page).not.toHaveURL(/[?&]share=/);
   });
 });
 
-test.describe('abuse reporting', () => {
-  test('accepts a report for a real link', async ({ page }) => {
-    const shareUrl = await uploadFile(page, { filename: 'reportable.txt' });
+test.describe("the uploader's own view of a link", () => {
+  test('reports the scan finishing without a reload', async ({ page }) => {
+    await uploadFile(page, { filename: 'live-status.txt' });
 
-    await page.goto('/report');
-    await page.getByLabel('Link being reported').fill(shareUrl);
-    await page.getByLabel('Reason').selectOption('phishing');
-    await page.getByLabel('Details (optional)').fill('Automated end-to-end test report.');
-    await page.getByRole('button', { name: 'Submit report' }).click();
+    // The badge starts at "Scanning". Nothing here reloads or navigates, so it
+    // can only reach "Ready" by the page polling for itself.
+    await expect(page.getByTestId('share-files')).toContainText('Scanning');
+    await expect(page.getByTestId('share-files')).toContainText('Ready', { timeout: 60_000 });
+  });
 
-    await expect(page.getByRole('heading', { name: 'Report received' })).toBeVisible();
+  test('survives a reload, still holding the link and the power to revoke it', async ({ page }) => {
+    const shareUrl = await uploadFile(page, { filename: 'reloadable.txt' });
+    await expect(page).toHaveURL(/[?&]share=[A-Za-z0-9_-]{22,}/);
+
+    await page.reload();
+
+    await expect(page.getByRole('heading', { name: 'Your Link Is Ready' })).toBeVisible();
+    await expect(page.getByTestId('share-url')).toHaveValue(shareUrl);
+    // The manage grant came back with it: a reload must not cost the uploader
+    // the only way they have to undo a share.
+    await expect(page.getByTestId('revoke')).toBeVisible();
+  });
+
+  test('sends a browser holding no manage grant to the link itself', async ({ page, browser }) => {
+    const shareUrl = await uploadFile(page, { filename: 'no-grant.txt' });
+    const token = shareUrl.split('/s/')[1] ?? '';
+    expect(token).not.toBe('');
+
+    // A separate context has never stored this link, so the uploader's view has
+    // nothing to show and the visitor's page is the only useful destination.
+    const stranger = await browser.newContext();
+    const strangerPage = await stranger.newPage();
+    try {
+      await strangerPage.goto(`/?share=${token}`);
+      await expect(strangerPage).toHaveURL(new RegExp(`/s/${token}$`));
+      await expect(strangerPage.getByRole('heading', { name: 'Your Link Is Ready' })).toHaveCount(
+        0,
+      );
+    } finally {
+      await stranger.close();
+    }
   });
 });
 
@@ -257,7 +293,7 @@ test.describe('accessibility and presentation', () => {
   test('supports keyboard navigation and a visible skip link', async ({ page }) => {
     await page.goto('/');
     await page.keyboard.press('Tab');
-    await expect(page.getByRole('link', { name: 'Skip to main content' })).toBeFocused();
+    await expect(page.getByRole('link', { name: 'Skip to Main Content' })).toBeFocused();
   });
 
   test('switches between light and dark themes', async ({ page }) => {
@@ -270,7 +306,7 @@ test.describe('accessibility and presentation', () => {
   test('renders usably at a mobile viewport', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: 'Share a file' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Share a File' })).toBeVisible();
     // No horizontal overflow.
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,

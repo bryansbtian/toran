@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: MIT
-
 /**
  * Field names that must never appear in a log line, whatever their value.
  *
@@ -63,38 +61,57 @@ function isSensitiveValue(value: string): boolean {
  * so a mistake at a call site degrades to a redacted field rather than a leak.
  */
 export function redact(value: unknown, depth = 0): unknown {
-  if (depth > 8) return '[truncated]';
+  if (depth > 8) {
+    return '[truncated]';
+  }
 
   if (typeof value === 'string') {
-    return isSensitiveValue(value) ? REDACTED : value;
+    if (isSensitiveValue(value)) {
+      return REDACTED;
+    }
+    return value;
   }
-  if (value === null || typeof value !== 'object') return value;
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
 
   if (Array.isArray(value)) {
     return value.slice(0, 100).map((entry) => redact(entry, depth + 1));
   }
 
   if (value instanceof Error) {
-    return {
+    const flattened: Record<string, unknown> = {
       name: value.name,
       message: redact(value.message, depth + 1),
-      ...(value.cause === undefined
-        ? {}
-        : { cause: redact(describeCause(value.cause), depth + 1) }),
     };
+    if (value.cause !== undefined) {
+      flattened.cause = redact(describeCause(value.cause), depth + 1);
+    }
+    return flattened;
   }
-  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
 
   const output: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-    output[key] = isSensitiveKey(key) ? REDACTED : redact(entry, depth + 1);
+    if (isSensitiveKey(key)) {
+      output[key] = REDACTED;
+      continue;
+    }
+    output[key] = redact(entry, depth + 1);
   }
   return output;
 }
 
 function describeCause(cause: unknown): unknown {
-  if (cause instanceof Error) return { name: cause.name, message: cause.message };
-  return typeof cause === 'string' ? cause : '[non-error cause]';
+  if (cause instanceof Error) {
+    return { name: cause.name, message: cause.message };
+  }
+  if (typeof cause === 'string') {
+    return cause;
+  }
+  return '[non-error cause]';
 }
 
 /**

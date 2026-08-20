@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 import type { FileStatus } from '@toran/shared';
 import { evaluateShare, evaluateShareFile, type ShareFile, type ShareWithFiles } from './shares.js';

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { and, eq, inArray, isNotNull, isNull, lt, lte, sql } from 'drizzle-orm';
 import type { Database } from '../client.js';
 import { ts } from '../sql-helpers.js';
@@ -83,7 +82,9 @@ export async function cleanupStaleUploads(
       .where(and(eq(uploadSessions.status, 'pending'), lte(uploadSessions.expiresAt, input.now)))
       .limit(input.limit);
 
-    if (stale.length === 0) return [];
+    if (stale.length === 0) {
+      return [];
+    }
 
     await tx
       .update(uploadSessions)

@@ -1,6 +1,5 @@
-// SPDX-License-Identifier: MIT
 import { enqueueJob } from '@toran/database';
-import type { JobType } from '@toran/shared';
+import { asError, type JobType } from '@toran/shared';
 import type { JobContext } from './jobs/types.js';
 
 /**
@@ -58,10 +57,7 @@ export class MaintenanceScheduler {
     const intervalMs = Math.max(this.context.config.worker.cleanupIntervalSeconds, 10) * 1000;
     const run = () => {
       void this.enqueueDue().catch((error: unknown) => {
-        this.context.logger.error(
-          { err: error instanceof Error ? error : undefined },
-          'failed to enqueue maintenance jobs',
-        );
+        this.context.logger.error({ err: asError(error) }, 'failed to enqueue maintenance jobs');
       });
     };
     run();
@@ -70,7 +66,9 @@ export class MaintenanceScheduler {
   }
 
   stop(): void {
-    if (this.timer) clearInterval(this.timer);
+    if (this.timer) {
+      clearInterval(this.timer);
+    }
     this.timer = undefined;
   }
 }

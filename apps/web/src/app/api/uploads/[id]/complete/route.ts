@@ -1,5 +1,12 @@
-// SPDX-License-Identifier: MIT
 import { completeUploadRequestSchema, ToranError, uuidSchema } from '@toran/shared';
+
+/** 201 for the completion that created the record, 200 for a replay of it. */
+function createdStatus(created: boolean): number {
+  if (created) {
+    return 201;
+  }
+  return 200;
+}
 import { assertSameOrigin, enforceRateLimit, handler, json, readJson } from '@/server/http';
 import { finishUpload } from '@/server/uploads';
 
@@ -23,7 +30,9 @@ export const POST = handler<{ id: string }>(
     });
 
     const uploadId = uuidSchema.safeParse(params.id);
-    if (!uploadId.success) throw new ToranError('NOT_FOUND');
+    if (!uploadId.success) {
+      throw new ToranError('NOT_FOUND');
+    }
 
     const body = await readJson(request, completeUploadRequestSchema, context);
     const result = await finishUpload(context, {
@@ -39,7 +48,9 @@ export const POST = handler<{ id: string }>(
         manageKey: result.manageKey,
       },
       context,
-      { status: result.created ? 201 : 200 },
+      // 201 only for the completion that actually created the record; a replayed
+      // completion is not a second creation.
+      { status: createdStatus(result.created) },
     );
   },
 );

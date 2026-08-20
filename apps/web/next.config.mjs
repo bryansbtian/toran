@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,10 +24,6 @@ for (const candidate of [path.join(here, '.env'), path.join(here, '..', '..', '.
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Standalone output is what the Docker image ships. It is opt-in so that a
-  // plain `npm run build && npm run start` on a host still uses `next start`,
-  // which does not support standalone output.
-  ...(process.env.TORAN_STANDALONE === 'true' ? { output: 'standalone' } : {}),
   reactStrictMode: true,
   poweredByHeader: false,
   // Workspace packages ship as ESM with .js specifiers; Next transpiles them

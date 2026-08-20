@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { generateShareToken, hashShareToken, hashPassword } from '@toran/security';
@@ -40,7 +39,10 @@ import {
 } from './maintenance.js';
 
 const reachable = allowIntegrationSkip(await isDatabaseReachable(), 'database integration tests');
-const suite = reachable ? describe : describe.skip;
+let suite: typeof describe | typeof describe.skip = describe.skip;
+if (reachable) {
+  suite = describe;
+}
 
 let test$: TestDatabase;
 
@@ -69,7 +71,9 @@ const uploadDefaults = () => ({
 async function onlyFileOf(shareLinkId: string): Promise<string> {
   const found = await findShareById(test$.db, shareLinkId);
   const fileId = found?.files[0]?.file.id;
-  if (fileId === undefined) throw new Error(`share ${shareLinkId} has no files`);
+  if (fileId === undefined) {
+    throw new Error(`share ${shareLinkId} has no files`);
+  }
   return fileId;
 }
 
@@ -91,12 +95,24 @@ async function seedReadyShare(
     .set({ status: 'ready', actualSize: 1024 })
     .where(eq(files.id, file.id));
 
+  let passwordHash: string | null = null;
+  if (options.password) {
+    passwordHash = await hashPassword(options.password);
+  }
+
+  // An explicit `null` means "never expires" and must survive; only an absent
+  // option inherits the file's own expiry.
+  let expiresAt = options.expiresAt;
+  if (expiresAt === undefined) {
+    expiresAt = file.expiresAt;
+  }
+
   const token = generateShareToken();
   const share = await createShareLink(test$.db, {
     fileIds: [file.id],
     tokenHash: hashShareToken(token),
-    passwordHash: options.password ? await hashPassword(options.password) : null,
-    expiresAt: options.expiresAt === undefined ? file.expiresAt : options.expiresAt,
+    passwordHash,
+    expiresAt,
     maxDownloads: options.maxDownloads ?? null,
   });
   return { file, share, token };
@@ -129,7 +145,6 @@ suite('database migrations', () => {
       'share_link_files',
       'download_events',
       'jobs',
-      'abuse_reports',
       'rate_limits',
     ]) {
       expect(names).toContain(table);
@@ -289,7 +304,9 @@ suite('upload lifecycle', () => {
       now: new Date(),
     });
     expect(outcome.kind).toBe('completed');
-    if (outcome.kind !== 'completed') return;
+    if (outcome.kind !== 'completed') {
+      return;
+    }
     expect(outcome.session.sharePasswordHash).toBe(passwordHash);
     expect(outcome.session.shareMaxDownloads).toBe(5);
   });
@@ -429,7 +446,9 @@ suite('share links and downloads', () => {
     const { share } = await seedReadyShare({ maxDownloads: 3 });
     const result = await reserveOnly(share.id);
     expect(result.kind).toBe('reserved');
-    if (result.kind !== 'reserved') return;
+    if (result.kind !== 'reserved') {
+      return;
+    }
     expect(result.remaining).toBe(2);
     expect(result.entry.downloadCount).toBe(1);
   });
@@ -439,7 +458,9 @@ suite('share links and downloads', () => {
     for (let i = 0; i < 5; i += 1) {
       const result = await reserveOnly(share.id);
       expect(result.kind).toBe('reserved');
-      if (result.kind === 'reserved') expect(result.remaining).toBeNull();
+      if (result.kind === 'reserved') {
+        expect(result.remaining).toBeNull();
+      }
     }
   });
 

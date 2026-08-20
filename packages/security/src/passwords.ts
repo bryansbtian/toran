@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { randomBytes } from 'node:crypto';
 import { argon2id, argon2Verify } from 'hash-wasm';
 
@@ -8,7 +7,7 @@ import { argon2id, argon2Verify } from 'hash-wasm';
  * Follows the OWASP Password Storage Cheat Sheet's second recommended profile
  * (19 MiB, t=2, p=1), which is the lowest configuration OWASP still considers
  * adequate and which stays comfortably inside the memory budget of a small
- * self-hosted container.
+ * container.
  *
  * `hash-wasm` is a pure-WebAssembly implementation: no native toolchain is
  * required, so `npm install` works identically on every platform and inside
@@ -52,8 +51,12 @@ export async function hashPassword(password: string): Promise<string> {
  * response. Verification is constant-time with respect to the password.
  */
 export async function verifyPassword(password: string, encodedHash: string): Promise<boolean> {
-  if (typeof password !== 'string' || typeof encodedHash !== 'string') return false;
-  if (password.length === 0 || !encodedHash.startsWith('$argon2')) return false;
+  if (typeof password !== 'string' || typeof encodedHash !== 'string') {
+    return false;
+  }
+  if (password.length === 0 || !encodedHash.startsWith('$argon2')) {
+    return false;
+  }
   try {
     return await argon2Verify({ password, hash: encodedHash });
   } catch {
@@ -72,6 +75,12 @@ let decoyHash: Promise<string> | null = null;
 
 export async function burnVerification(password: string): Promise<false> {
   decoyHash ??= hashPassword(`toran-decoy-${randomBytes(16).toString('hex')}`);
-  await verifyPassword(password.length > 0 ? password : 'x', await decoyHash);
+  // An empty attempt still has to cost a full verification, or "no password
+  // supplied" would be distinguishable from "wrong password" by timing alone.
+  let attempt = password;
+  if (attempt.length === 0) {
+    attempt = 'x';
+  }
+  await verifyPassword(attempt, await decoyHash);
   return false;
 }

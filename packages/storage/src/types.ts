@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: MIT
-
 export interface StoredObjectMetadata {
   readonly key: string;
   readonly size: number;

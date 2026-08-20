@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import { backoffDelaySeconds, type JobType } from '@toran/shared';
 import type { Database } from '../client.js';
@@ -25,16 +24,23 @@ export interface EnqueueInput {
  * finds no row inserted and reads back the first one.
  */
 export async function enqueueJob(db: Database, input: EnqueueInput): Promise<JobRow> {
-  const values = {
+  // Assigned only when present so the column default applies otherwise.
+  const values: typeof jobs.$inferInsert = {
     type: input.type,
     payload: input.payload ?? {},
     availableAt: input.availableAt ?? new Date(),
-    ...(input.maxAttempts === undefined ? {} : { maxAttempts: input.maxAttempts }),
-    ...(input.dedupeKey === undefined ? {} : { dedupeKey: input.dedupeKey }),
   };
+  if (input.maxAttempts !== undefined) {
+    values.maxAttempts = input.maxAttempts;
+  }
+  if (input.dedupeKey !== undefined) {
+    values.dedupeKey = input.dedupeKey;
+  }
 
   const [inserted] = await db.insert(jobs).values(values).onConflictDoNothing().returning();
-  if (inserted) return inserted;
+  if (inserted) {
+    return inserted;
+  }
 
   if (input.dedupeKey !== undefined) {
     const [existing] = await db
@@ -42,13 +48,17 @@ export async function enqueueJob(db: Database, input: EnqueueInput): Promise<Job
       .from(jobs)
       .where(and(eq(jobs.dedupeKey, input.dedupeKey), inArray(jobs.status, ['queued', 'running'])))
       .limit(1);
-    if (existing) return existing;
+    if (existing) {
+      return existing;
+    }
   }
 
   // No dedupe key and still no row: retry once without the conflict clause so a
   // genuine insert failure surfaces as an error rather than silently vanishing.
   const [row] = await db.insert(jobs).values(values).returning();
-  if (!row) throw new Error('failed to enqueue job');
+  if (!row) {
+    throw new Error('failed to enqueue job');
+  }
   return row;
 }
 
@@ -68,10 +78,10 @@ export async function claimJobs(
     readonly types?: readonly JobType[];
   },
 ): Promise<JobRow[]> {
-  const typeFilter =
-    input.types && input.types.length > 0
-      ? sql`and type = any(${sql.param(input.types as string[])}::text[])`
-      : sql``;
+  let typeFilter = sql``;
+  if (input.types && input.types.length > 0) {
+    typeFilter = sql`and type = any(${sql.param(input.types as string[])}::text[])`;
+  }
 
   const claimed = await db.execute<RawJobRow>(sql`
     with due as (
@@ -122,6 +132,13 @@ interface RawJobRow extends Record<string, unknown> {
   updated_at: string | Date;
 }
 
+function toDateOrNull(value: string | Date | null): Date | null {
+  if (value === null) {
+    return null;
+  }
+  return new Date(value);
+}
+
 function toJobRow(raw: RawJobRow): JobRow {
   return {
     id: raw.id,
@@ -131,7 +148,7 @@ function toJobRow(raw: RawJobRow): JobRow {
     attempts: Number(raw.attempts),
     maxAttempts: Number(raw.max_attempts),
     availableAt: new Date(raw.available_at),
-    lockedAt: raw.locked_at === null ? null : new Date(raw.locked_at),
+    lockedAt: toDateOrNull(raw.locked_at),
     lockedBy: raw.locked_by,
     lastError: raw.last_error,
     dedupeKey: raw.dedupe_key,
@@ -167,7 +184,9 @@ export async function failJob(
   },
 ): Promise<JobFailureResult> {
   const [current] = await db.select().from(jobs).where(eq(jobs.id, input.jobId)).limit(1);
-  if (!current) return { retrying: false, nextAttemptAt: null };
+  if (!current) {
+    return { retrying: false, nextAttemptAt: null };
+  }
 
   const exhausted = current.attempts >= current.maxAttempts;
   const retryable = input.retryable ?? true;
@@ -186,9 +205,7 @@ export async function failJob(
     return { retrying: false, nextAttemptAt: null };
   }
 
-  const delaySeconds = backoffDelaySeconds(current.attempts, {
-    ...(input.random ? { random: input.random } : {}),
-  });
+  const delaySeconds = backoffDelaySeconds(current.attempts, { random: input.random });
   const nextAttemptAt = new Date(input.now.getTime() + delaySeconds * 1000);
 
   await db
@@ -257,14 +274,15 @@ export async function listJobs(
   db: Database,
   input: { readonly status?: JobRow['status']; readonly limit?: number },
 ): Promise<JobRow[]> {
+  const limit = input.limit ?? 50;
   const query = db.select().from(jobs);
-  const rows = input.status
-    ? await query
-        .where(eq(jobs.status, input.status))
-        .orderBy(asc(jobs.availableAt))
-        .limit(input.limit ?? 50)
-    : await query.orderBy(asc(jobs.availableAt)).limit(input.limit ?? 50);
-  return rows;
+  if (input.status) {
+    return await query
+      .where(eq(jobs.status, input.status))
+      .orderBy(asc(jobs.availableAt))
+      .limit(limit);
+  }
+  return await query.orderBy(asc(jobs.availableAt)).limit(limit);
 }
 
 /** Puts a dead job back on the queue with a fresh attempt budget. */

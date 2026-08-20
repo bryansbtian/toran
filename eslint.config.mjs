@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import globals from 'globals';
@@ -105,4 +104,20 @@ export default tseslint.config(
     },
   },
   prettier,
+  // Deliberately after `prettier`. `eslint-config-prettier` switches `curly`
+  // off because it conflicts with `curly: ["error", "multi-line"]`, which lets
+  // Prettier and ESLint disagree about a wrapped single statement. The "all"
+  // form has no such conflict: Prettier never adds or removes braces, so this
+  // only ever fixes what Prettier has no opinion about.
+  //
+  // These three encode the non-negotiable style rules in CLAUDE.md. They were
+  // absent, which is how 416 violations of them accumulated without `npm run
+  // lint` ever going red.
+  {
+    rules: {
+      curly: ['error', 'all'],
+      'no-ternary': 'error',
+      'no-nested-ternary': 'error',
+    },
+  },
 );

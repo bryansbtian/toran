@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 import { createTestLogger } from './logger.js';
 import { redact, REDACTED, safeUrl } from './redaction.js';
@@ -69,7 +68,9 @@ describe('redact', () => {
 
   it('stops at a bounded depth', () => {
     let nested: Record<string, unknown> = { value: 'deep' };
-    for (let i = 0; i < 20; i += 1) nested = { nested };
+    for (let i = 0; i < 20; i += 1) {
+      nested = { nested };
+    }
     expect(JSON.stringify(redact(nested))).toContain('[truncated]');
   });
 });

@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: MIT
 import { createServer } from 'node:http';
+import { asError, errorMessage } from '@toran/shared';
 import { pingDatabase } from '@toran/database';
 import { createWorkerRuntime } from './context.js';
 import { cleanupJobs } from './jobs/cleanup.js';
@@ -63,7 +63,9 @@ async function main(): Promise<void> {
 
   let shuttingDown = false;
   const shutdown = (signal: string) => {
-    if (shuttingDown) return;
+    if (shuttingDown) {
+      return;
+    }
     shuttingDown = true;
     context.logger.info({ signal }, 'shutting down');
 
@@ -93,7 +95,7 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('unhandledRejection', (reason) => {
     context.logger.error(
-      { err: reason instanceof Error ? reason : undefined, errorCategory: 'UNHANDLED_REJECTION' },
+      { err: asError(reason), errorCategory: 'UNHANDLED_REJECTION' },
       'unhandled promise rejection',
     );
   });
@@ -102,6 +104,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error('[toran:worker] fatal:', error instanceof Error ? error.message : 'unknown error');
+  console.error('[toran:worker] fatal:', errorMessage(error));
   process.exit(1);
 });
