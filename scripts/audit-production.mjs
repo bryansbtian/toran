@@ -68,6 +68,14 @@ const ACCEPTED = {
       'Same reachability argument: build-time only, over CSS committed to this repository.',
     revisitWhen: 'Next.js depends on postcss >= 8.5.18',
   },
+  'GHSA-fxqj-rqcc-2cmp': {
+    package: 'postcss',
+    reason:
+      'Incomplete fix of GHSA-6g55-p6wh-862q above: an attacker-controlled sourceMappingURL ' +
+      'still reads arbitrary .map files when `from` is unset. Same reachability argument, ' +
+      'and it needs a later postcss than the other three, because 8.5.18 is still affected.',
+    revisitWhen: 'Next.js depends on postcss >= 8.5.23',
+  },
   'GHSA-r28c-9q8g-f849': {
     package: 'postcss',
     reason:
