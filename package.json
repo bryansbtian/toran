@@ -39,16 +39,16 @@
     "audit:prod": "node scripts/audit-production.mjs"
   },
   "devDependencies": {
-    "@eslint/js": "^9.18.0",
-    "@next/eslint-plugin-next": "^15.1.6",
-    "@types/node": "^22.10.7",
-    "eslint": "^9.18.0",
-    "eslint-config-prettier": "^9.1.0",
-    "eslint-plugin-react-hooks": "^5.1.0",
-    "globals": "^15.14.0",
+    "@eslint/js": "^10.0.1",
+    "@next/eslint-plugin-next": "^16.3.3",
+    "@types/node": "^26.4.0",
+    "eslint": "^10.9.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.11.0",
     "prettier": "^3.4.2",
-    "turbo": "^2.3.3",
-    "typescript": "^5.7.3",
-    "typescript-eslint": "^8.20.0"
+    "turbo": "^2.10.12",
+    "typescript": "^7.0.2",
+    "typescript-eslint": "^8.68.0"
   }
 }
